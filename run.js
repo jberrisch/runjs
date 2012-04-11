@@ -10,6 +10,7 @@ var daemonize_c   = daemonize_bin + ".c";
 var daemonize_mode = 0550;
 var kill_timeout  = 1000;
 var probe_timeout = 500;
+var probe_start   = 500;
 var launch_timeout = 60000;
 var cc_bin         = "gcc"
 var command_poll = 500;
@@ -429,7 +430,7 @@ function startMonitor(tag, flags, script, args) {
         monlog(tag, "Monitor failure, how to return err?");
         return;
     }
-    monlog(tag, JSON.stringify(flags));
+    
     var tp = getTagPaths(tag);
     // open stdout and stderr for write
     var outfile = fs.createWriteStream(tp.out, {
@@ -542,12 +543,12 @@ function startMonitor(tag, flags, script, args) {
     
     if(tag[0] == '_'){
         if(!flags['-w'])
-            startProbing();
+            setTimeout(startProbing, probe_start);
         else {
             launchTimer = setTimeout(function(){
                 monlog(tag, "Hardkilling process because waitfor condition timed out");
                 p.kill("SIGKILL");
-            },  flags['-lt'] ? parseInt(flags['-lt'])*1000 : launch_timeout);
+            },  flags['-lt'] ? parseInt(flags['-lt'], 10)*1000 : launch_timeout);
         }
     }
     
@@ -561,7 +562,7 @@ function startMonitor(tag, flags, script, args) {
             d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
                 var delta = now - parseFloat(stamp);
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                fs.writeSync(fd, delta+"\n");
+                fs.writeSync(fd, delta+" "+rest+"\n");
                 fs.closeSync(fd);
                 return ''; 
             });
@@ -620,7 +621,11 @@ function startMonitor(tag, flags, script, args) {
 exports.reflector = function(on){
     process.stdin.on('data', function(data){
         data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
-            return m;
+            return '[[[[[['+a+' '+
+                JSON.stringify({
+                    uv:process.uvCounters?process.uvCounters():'no counters', 
+                    mem:process.memoryUsage?process.memoryUsage():'no memusage'
+                })+']]]]]]';
         });
         process.stderr.write(data);
         // parse data and inject status
