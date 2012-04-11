@@ -8,7 +8,9 @@ var node_bin = "node";
 var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
 var daemonize_c   = daemonize_bin + ".c";
 var daemonize_mode = 0550;
-var probetimeout  = 1000;
+var kill_timeout  = 1000;
+var probe_timeout = 500;
+var launch_timeout = 60000;
 var cc_bin         = "gcc"
 var command_poll = 500;
 var appname = "#m runjs# ";
@@ -70,6 +72,7 @@ function monlog(tag, msg) {
 
 process.on("uncaughtException", function(err) {
     monlog("MONITOR CRASH", err.message+"\n"+err.stack);
+//    process.debug("MONITOR CRASH", err.message+"\n"+err.stack);
     process.exit(-1);
 });
 
@@ -382,13 +385,13 @@ function formatTaglist(out, tags){
 //    actual monitor function
 // ------------------------------------------------------------------------------------------
 
-function startMonitor(tag, script, args) {
+function startMonitor(tag, flags, script, args) {
     if (!tag || !script) {
         // we fail!.. no way to return an error
         monlog(tag, "Monitor failure, how to return err?");
         return;
     }
-
+    monlog(tag, JSON.stringify(flags));
     var tp = getTagPaths(tag);
     // open stdout and stderr for write
     var outfile = fs.createWriteStream(tp.out, {
@@ -483,25 +486,36 @@ function startMonitor(tag, script, args) {
     fs.writeFileSync(tp.monpid, ""+process.pid);
     fs.writeFileSync(tp.pid, ""+p.pid);
 
-    var kt = null;
-    if(tag[0] === '_'){
-        function probeTimeout(){
-            monlog(tag, "Hardkilling process because messageloop appears dead");
-            p.kill("SIGKILL");
-        }
-
-        kt = setTimeout(probeTimeout, 60 * 1000); // Let's give it a minute to start
+    var killTimer = null, probeTimer = null, launchTimer = null;
     
-        var pt = setInterval(function(){
+    function killTimeout(){
+        monlog(tag, "Hardkilling process because messageloop appears dead");
+        p.kill("SIGKILL");
+    }
+            
+    function startProbing(){
+        killTimer = setTimeout(killTimeout, kill_timeout);
+    
+        probeTimer = setInterval(function(){
             if(p)
                 p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
-        }, 500);
+        }, probe_timeout);
+    }
+    
+    if(!flags['-w'])
+        startProbing();
+    else {
+        launchTimer = setTimeout(function(){
+            monlog(tag, "Hardkilling process because waitfor condition timed out");
+            p.kill("SIGKILL");
+        },  flags['-lt'] ? parseInt(flags['-lt'])*1000 : launch_timeout);
     }
     
     p.stderr.on('data', function(data) {
-        if(kt) {
-            clearTimeout(kt);
-            kt = setTimeout(probeTimeout, probetimeout);
+        if(killTimer){
+            clearTimeout(killTimer);
+            killTimer = setTimeout(killTimeout, kill_timeout);
+            
             var d = data.toString();
             var now = new Date().getTime();
             d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
@@ -515,18 +529,25 @@ function startMonitor(tag, script, args) {
         } else
             outfile.write(data);
     });
-
+    
+    var init_stdout = "";
     p.stdout.on('data', function(data) {
         outfile.write(data);
+        if(flags['-w'] && !probeTimer){ // we need to be watching for start condition to begin probing
+            init_stdout += data.toString();
+            if(init_stdout.indexOf(flags['-w']) != -1){
+                clearTimeout(launchTimer);
+                startProbing();   
+            }
+        }
     });
 
     p.on('exit', function(code) {
-        if(kt) 
-            clearTimeout(kt);
-        kt = null;
-        if(pt)
-            clearTimeout(pt);
-        console.error("Child process died.");
+        if(killTimer) 
+            clearTimeout(killTimer);
+        if(probeTimer)
+            clearTimeout(probeTimer);
+        monlog(tag,"Child process died.");
         outfile.write("-------------------------- Child process ended. ----------------------------\n");
         outfile.end();
         if (pi) clearInterval(pi);
@@ -540,7 +561,7 @@ function startMonitor(tag, script, args) {
             }
             monlog(tag,"Restarted the process  "+ restarts +" time(s)");
             fs.writeFileSync(tp.restarts, ""+restarts);
-            startMonitor(tag, script, args);
+            startMonitor(tag, flags, script, args);
         }
         else {
             archiveTag(tag);
@@ -602,17 +623,18 @@ function createTagPaths(tag, script, cb){
 }
 
 
-exports.start = function(tag, script, args, cb) {
+exports.start = function(tag, flags, script, args, cb) {
     createTagPaths(tag, script, function(err){
         if(err)
             return cb(err);    
             
         if (NODAEMONIZE) {
-            startMonitor(tag, script, args);
+            startMonitor(tag, flags, script, args);
             cb();
         } else {
             // use daemonize to start monitor
-            var a = [module.filename, "monitor", tag, script];
+            
+            var a = [module.filename, "monitor", tag, JSON.stringify(flags), script];
             a = a.concat(args);
             var p = cp.spawn(daemonize_bin, a), d = "";
             p.stdout.on('data', function(data) {
@@ -782,6 +804,7 @@ exports.list = function(wantArchived, cb) {
     var tp = getTagPaths("");
     fs.readdir(tp.root, function(err, dir) {
         if (err) return cb(err);
+        
         // for each directory lets list all files to build up our process list
         var cbcount = 0, cbtotal = 0, list = [];
 
@@ -799,7 +822,7 @@ exports.list = function(wantArchived, cb) {
                 });
             };
         }
-        if(dir.length == 0)
+        if(!cbcount)
             cb(null, null);
     });
 }
@@ -850,7 +873,7 @@ function help() {
     out("a tag is a short identifier you can use to name and select a process, if omitted the script name is the tag");
     out("")
     out(n + " #bg [list] #w list running processes with latest stdout/err")
-    out(n + " #bg run #by [tag] #bc jsfile[.js] #bb [arguments] #w starts a process and directly tails it")
+    out(n + " #bg run #by [tag] #bb [-w:'waitforstring'] #bc jsfile[.js] #bb [arguments] #w starts a process and directly tails it")
     out(n + " #bg cluster #br nodes # #by [tag] #bc jsfile[.js] #bb [arguments] #w starts a cluster with n nodes")
     out(n + " #bg start #by [tag] #bc jsfile[.js] #bb [arguments] #w starts a process")
     out(n + " #bg stop #by tag #w stop particular process")
@@ -879,13 +902,13 @@ if (args.length == 0 || args[0].match(/^(\-l|list|listall)/i)) {
 }
 
 if(args[0].match(/^monitor$/i)){
-    if(!args[1] || !args[2]){
-        out('#brERROR: # please call internal monitor function correctly if you must: [tag] [script] [args]');
+    if(!args[1] || !args[2] || !args[3]){
+        out('#brERROR: # please call internal monitor function correctly if you must: [tag] [flagsjson] [script] [args]');
         return process.exit(-1);
     } else {
         createTagPaths(args[1], args[2], function(err){
             if (err) out("#br ERROR: # " + err);
-            return startMonitor(args[1], args[2], args.slice(3));
+            return startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
         });
     }
     return;
@@ -910,7 +933,6 @@ if (args[0].match(/^switch/i)) {
             if (err) out("#br ERROR: # " + err);
         });
 }
-
 
 if (args[0].match(/^restart/i)) {
     return exports.restart(args[1],
@@ -948,19 +970,37 @@ if (args[0].match(/^tail$/i)) {
 if (args[0].match(/^cluster$/i)) {
 }
 
-if (args[0].match(/^\-/)) {
+/*if (args[0].match(/^\-/)) {
     out('#br ERROR: # Invalid argument: ' + args[0]);
     return help();
-}
+}*/
 
 var startcmd = ""
 if (args[0].match(/^(start|run)$/i)) startcmd = args.shift();
 
-var tag = args[0];
+var tag = null;
 if (args[0].match(/^\[/)) tag = args.shift().replace(/[^a-zA-Z0-9_]/g, "");
 
+// parse out monitor flags
+var flags = {};
+while(args.length){
+    if(args[0] && args[0].charAt(0) != '-') break;
+    var n = args.shift(), k = '';
+    n = n.replace(/(\-[a-zA-Z]+)\:?/,function(m,a){
+        k = a.toLowerCase();
+        return '';
+    });
+    if(!k){
+        out('#br ERROR: # Invalid argument: ' + args[0]); 
+        process.exit(-1);
+        return;
+    }
+    flags[k] = n;
+}
+if(!tag) tag = args[0];
+
 out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag);
-exports.start(tag, args.shift(), args, function(err, d) {
+exports.start(tag, flags, args.shift(), args, function(err, d) {
     if (err)
         out("#br ERROR: # " + err)
     else if (startcmd == 'run') { // go tail stdout immediately
