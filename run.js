@@ -486,7 +486,7 @@ function startMonitor(tag, flags, script, args) {
                 clearInterval(pi);
                 pi = null;
 
-                exports.start(newTag, script, args, function(err) {
+                exports.start(newTag, flags, script, args, function(err) {
                     if(err)
                         monlog(tag, err); // no return on purpose
                     setTimeout(function() {
