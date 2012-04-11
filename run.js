@@ -484,22 +484,22 @@ function startMonitor(tag, script, args) {
     fs.writeFileSync(tp.pid, ""+p.pid);
 
     var kt = null;
-    if(tag[0]=='_'){
+    if(tag[0] === '_'){
         function probeTimeout(){
             monlog(tag, "Hardkilling process because messageloop appears dead");
             p.kill("SIGKILL");
         }
-            
-        kt = setTimeout(probeTimeout, probetimeout);
+
+        kt = setTimeout(probeTimeout, 60 * 1000); // Let's give it a minute to start
     
         var pt = setInterval(function(){
             if(p)
                 p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
-        }, 300);
+        }, 500);
     }
     
     p.stderr.on('data', function(data) {
-        if(kt){
+        if(kt) {
             clearTimeout(kt);
             kt = setTimeout(probeTimeout, probetimeout);
             var d = data.toString();
@@ -512,7 +512,8 @@ function startMonitor(tag, script, args) {
                 return '';
             });
             outfile.write(d);
-        }else outfile.write(data);
+        } else
+            outfile.write(data);
     });
 
     p.stdout.on('data', function(data) {
