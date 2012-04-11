@@ -65,15 +65,15 @@ function outPad(str, len, pad) { // decolorized padder
 function monlog(tag, msg) {
     var paths = getTagPaths(tag);
     var fd = fs.openSync(paths.monlog, "a+");
-    var msg =  "[" + tag + " " + Date.now() + "] " + msg + "\n";
+    var msg =  "[" + tag + " " + (new Date).toString() + "] " + msg + "\n";
     fs.writeSync(fd, msg);
     fs.closeSync(fd);
     process.stdout.write(msg);
 }
 
+var uncaught_exception_tag = null;
 process.on("uncaughtException", function(err) {
-    monlog("MONITOR CRASH", err.message+"\n"+err.stack);
-//    process.debug("MONITOR CRASH", err.message+"\n"+err.stack);
+    monlog(uncaught_exception_tag, "Monitor Exception "+err.message+"\n"+err.stack);
     process.exit(-1);
 });
 
@@ -427,9 +427,12 @@ function formatTaglist(out, tags){
 function startMonitor(tag, flags, script, args) {
     if (!tag || !script) {
         // we fail!.. no way to return an error
-        monlog(tag, "Monitor failure, how to return err?");
+        monlog(tag, "No tag or script file passed to startmonitor, exiting");
+        process.exit(-1);
         return;
     }
+    
+    uncaught_exception_tag = tag;
     
     var tp = getTagPaths(tag);
     // open stdout and stderr for write
@@ -448,8 +451,7 @@ function startMonitor(tag, flags, script, args) {
     var restarting = true;
     var pi = setInterval(commandFilePoll, command_poll);
 
-    function stopAndArchiveSelf(sig, restart) {
-        monlog(tag, "Stop and archive " + script);
+    function stopProcess(sig, restart) {
         restarting = restart;
         clearInterval(pi);
         pi = null;
@@ -472,16 +474,18 @@ function startMonitor(tag, flags, script, args) {
 
             default:
             case "stop":
-                stopAndArchiveSelf('SIGTERM', false);
+                monlog(tag, "Stop command received, sending SIGTERM");
+                stopProcess('SIGTERM', false);
                 break;
 
             case "restart":
-                stopAndArchiveSelf('SIGTERM', true);
+                monlog(tag, "Restart command received, sending SIGTERM");
+                stopProcess('SIGTERM', true);
                 break;
 
             case "switch":
                 // lets start ourselves with a new start-rev number, and send ourselves a shutdown signal
-                //
+                monlog(tag, "Switch command received, starting new process");
                 var newTag = switchTag(tag);
                 clearInterval(pi);
                 pi = null;
@@ -490,7 +494,8 @@ function startMonitor(tag, flags, script, args) {
                     if(err)
                         monlog(tag, err); // no return on purpose
                     setTimeout(function() {
-                        stopAndArchiveSelf('SIGHUP', false);
+                        monlog(tag, "Switch sending SIGHUP");
+                        stopProcess('SIGHUP', false);
                     }, 30 * 1000);
                 });
 
@@ -498,8 +503,7 @@ function startMonitor(tag, flags, script, args) {
         // cant write the file.. have to modify the modifystamp.
         fs.writeFileSync(tp.pid, ""+p.pid);
     }
-
-
+    
     function gotSig() {
         if(p) {
             p.kill("SIGTERM");
@@ -517,6 +521,8 @@ function startMonitor(tag, flags, script, args) {
     var cmd = args ? args.slice(0) : [];
     cmd.unshift(script);
 
+    monlog(tag, "Starting process "+node_bin+" "+cmd.join(' '));
+
     var p = cp.spawn(node_bin, cmd, {
         env: process.env,
         cwd: process.cwd()
@@ -528,7 +534,7 @@ function startMonitor(tag, flags, script, args) {
     var killTimer = null, probeTimer = null, launchTimer = null;
     
     function killTimeout(){
-        monlog(tag, "Hardkilling process because messageloop appears dead");
+        monlog(tag, "Sending SIGKILL because messageloop appears dead");
         p.kill("SIGKILL");
     }
             
@@ -546,7 +552,7 @@ function startMonitor(tag, flags, script, args) {
             setTimeout(startProbing, probe_start);
         else {
             launchTimer = setTimeout(function(){
-                monlog(tag, "Hardkilling process because waitfor condition timed out");
+                monlog(tag, "Sending SIGKILL because waitfor condition timed out");
                 p.kill("SIGKILL");
             },  flags['-lt'] ? parseInt(flags['-lt'], 10)*1000 : launch_timeout);
         }
@@ -588,23 +594,26 @@ function startMonitor(tag, flags, script, args) {
             clearTimeout(killTimer);
         if(probeTimer)
             clearTimeout(probeTimer);
-        monlog(tag,"Child process died.");
-        outfile.write("-------------------------- Child process ended. ----------------------------\n");
+            
+        outfile.write("--- Process "+p.pid+" exited with code "+code+".----\n");
         outfile.end();
         if (pi) clearInterval(pi);
         pi = null;
         p = null;
+        
         if (restarting){
             try{
                 var restarts = parseInt(fs.readFileSync(tp.restarts), 10) + 1;
             } catch(e){
                 restarts = 1;
             }
-            monlog(tag,"Restarted the process  "+ restarts +" time(s)");
+            monlog(tag, "Process exit received, restarting counter:"+restarts+" exit code:"+code);
             fs.writeFileSync(tp.restarts, ""+restarts);
             startMonitor(tag, flags, script, args);
         }
         else {
+            monlog(tag, "Process exit received, archiving. exit code:"+code);
+            
             archiveTag(tag);
 
             if(!NODAEMONIZE)
@@ -967,7 +976,7 @@ if (args[0].match(/^monlog/i)) {
     var paths = getTagPaths("");
     out("Tailing monitor log");
     return follow(paths.monlog, 10, function(err, msg) {
-        console.log(msg);
+        process.stdout.write(msg);
     });
 }
 
