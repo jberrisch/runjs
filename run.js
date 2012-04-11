@@ -272,6 +272,44 @@ function archiveTag(tag) {
     }
 }
 
+
+function createTagPaths(tag, script, cb){
+    var tp = getTagPaths(tag);
+
+    try {
+        if (!fs.statSync(tp.root).isDirectory()) throw (0)
+    }
+    catch (e) {
+        try {
+            fs.mkdirSync(tp.root, tp.root_mode);
+            fs.chmodSync(tp.root, tp.root_mode);
+        }
+        catch (e) {
+            return cb("Cannot create root folder for processes " + tp.root + " \n" + e);
+        }
+    }
+
+    // check if the script file actually exists before we try to start it
+    try {
+        if (!fs.statSync(script).isFile()) throw (0);
+    }
+    catch (e) {
+        return cb("File does not exist: " + script);
+    }
+    // first we create the tagdir, operating as a mutexe
+    try {
+        fs.mkdirSync(tp.dir, tp.dir_mode);
+        fs.chmodSync(tp.dir, tp.dir_mode);
+    }
+    catch (e) {
+        // todo, detect dirty state and clean up some shit
+        // check system startup time for dirty after reboot
+        return cb("Tag collision detected, please give your process a new #by [tag] # or cleanup the existing process. " + e)
+    }
+    // how do we get our own name?
+    cb();
+}
+
 function formatTaglist(out, tags){
     var cols = {
         'Tag': function(p) {
@@ -502,13 +540,15 @@ function startMonitor(tag, flags, script, args) {
         }, probe_timeout);
     }
     
-    if(!flags['-w'])
-        startProbing();
-    else {
-        launchTimer = setTimeout(function(){
-            monlog(tag, "Hardkilling process because waitfor condition timed out");
-            p.kill("SIGKILL");
-        },  flags['-lt'] ? parseInt(flags['-lt'])*1000 : launch_timeout);
+    if(tag[0] == '_'){
+        if(!flags['-w'])
+            startProbing();
+        else {
+            launchTimer = setTimeout(function(){
+                monlog(tag, "Hardkilling process because waitfor condition timed out");
+                p.kill("SIGKILL");
+            },  flags['-lt'] ? parseInt(flags['-lt'])*1000 : launch_timeout);
+        }
     }
     
     p.stderr.on('data', function(data) {
@@ -523,7 +563,7 @@ function startMonitor(tag, flags, script, args) {
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
                 fs.writeSync(fd, delta+"\n");
                 fs.closeSync(fd);
-                return '';
+                return ''; 
             });
             outfile.write(d);
         } else
@@ -579,49 +619,14 @@ function startMonitor(tag, flags, script, args) {
 
 exports.reflector = function(on){
     process.stdin.on('data', function(data){
+        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
+            return m;
+        });
         process.stderr.write(data);
         // parse data and inject status
     });
     process.stdin.resume();
 }
-
-function createTagPaths(tag, script, cb){
-    var tp = getTagPaths(tag);
-
-    try {
-        if (!fs.statSync(tp.root).isDirectory()) throw (0)
-    }
-    catch (e) {
-        try {
-            fs.mkdirSync(tp.root, tp.root_mode);
-            fs.chmodSync(tp.root, tp.root_mode);
-        }
-        catch (e) {
-            return cb("Cannot create root folder for processes " + tp.root + " \n" + e);
-        }
-    }
-
-    // check if the script file actually exists before we try to start it
-    try {
-        if (!fs.statSync(script).isFile()) throw (0);
-    }
-    catch (e) {
-        return cb("File does not exist: " + script);
-    }
-    // first we create the tagdir, operating as a mutexe
-    try {
-        fs.mkdirSync(tp.dir, tp.dir_mode);
-        fs.chmodSync(tp.dir, tp.dir_mode);
-    }
-    catch (e) {
-        // todo, detect dirty state and clean up some shit
-        // check system startup time for dirty after reboot
-        return cb("Tag collision detected, please give your process a new #by [tag] # or cleanup the existing process. " + e)
-    }
-    // how do we get our own name?
-    cb();
-}
-
 
 exports.start = function(tag, flags, script, args, cb) {
     createTagPaths(tag, script, function(err){
