@@ -631,11 +631,20 @@ function startMonitor(tag, flags, script, args) {
 exports.reflector = function(on){
     process.stdin.on('data', function(data){
         data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
-            return '[[[[[['+a+' '+
-                JSON.stringify({
-                    uv:process.uvCounters?process.uvCounters():'no counters', 
-                    mem:process.memoryUsage?process.memoryUsage():'no memusage'
-                })+']]]]]]';
+						try {
+							return '[[[[[['+a+' '+
+									JSON.stringify({
+											uv:process.uvCounters?process.uvCounters():'no counters', 
+											mem:process.memoryUsage?process.memoryUsage():'no memusage'
+									})+']]]]]]';
+						} catch(e) {
+							return '[[[[[['+a+' '+
+									JSON.stringify({
+											uv:'no counters', 
+											mem:'no memusage',
+                      err: e.message
+									})+']]]]]]';
+						}
         });
         process.stderr.write(data);
         // parse data and inject status
