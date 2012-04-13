@@ -36,6 +36,10 @@ function getTagPaths(tag) {
     };
 }
 
+function shortDateTime(d) {
+    return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDay() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+}
+
 // ------------------------------------------------------------------------------------------
 //    console colors
 // ------------------------------------------------------------------------------------------
@@ -568,7 +572,7 @@ function startMonitor(tag, flags, script, args) {
             d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
                 var delta = now - parseFloat(stamp);
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                fs.writeSync(fd, delta+" "+rest+"\n");
+                fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
                 fs.closeSync(fd);
                 return ''; 
             });
