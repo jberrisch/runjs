@@ -8,7 +8,7 @@ var node_bin = "node";
 var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
 var daemonize_c   = daemonize_bin + ".c";
 var daemonize_mode = 0550;
-var kill_timeout  = 1000;
+var kill_timeout  = 10000;
 var probe_timeout = 500;
 var probe_start   = 500;
 var launch_timeout = 60000;
@@ -583,6 +583,7 @@ function startMonitor(tag, flags, script, args) {
         if(flags['-w'] && !probeTimer){ // we need to be watching for start condition to begin probing
             init_stdout += data.toString();
             if(init_stdout.indexOf(flags['-w']) != -1){
+                monlog(tag, "Probe start wait condition met ("+flags['-w']+")");
                 clearTimeout(launchTimer);
                 startProbing();   
             }
