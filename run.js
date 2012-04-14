@@ -542,8 +542,12 @@ function startMonitor(tag, flags, script, args) {
         killTimer = setTimeout(killTimeout, kill_timeout);
     
         probeTimer = setInterval(function(){
-            if(p)
-                p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
+            try {
+                if(p)
+                    p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
+            } catch(e) { 
+                monlog(null, "Could not write to input stream: " + e.message);
+            }
         }, probe_timeout);
     }
     
@@ -567,9 +571,13 @@ function startMonitor(tag, flags, script, args) {
             var now = new Date().getTime();
             d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
                 var delta = now - parseFloat(stamp);
-                var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                fs.writeSync(fd, delta+" "+rest+"\n");
-                fs.closeSync(fd);
+                try {
+                    var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
+                    fs.writeSync(fd, delta+" "+rest+"\n");
+                    fs.closeSync(fd);
+                } catch(e) {
+                    monlog(null, "Failed to write to probe file: " + e.message);
+                }
                 return ''; 
             });
             outfile.write(d);
