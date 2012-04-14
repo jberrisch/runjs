@@ -36,6 +36,10 @@ function getTagPaths(tag) {
     };
 }
 
+function shortDateTime(d) {
+    return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDay() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+}
+
 // ------------------------------------------------------------------------------------------
 //    console colors
 // ------------------------------------------------------------------------------------------
@@ -573,7 +577,7 @@ function startMonitor(tag, flags, script, args) {
                 var delta = now - parseFloat(stamp);
                 try {
                     var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                    fs.writeSync(fd, delta+" "+rest+"\n");
+                    fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
                     fs.closeSync(fd);
                 } catch(e) {
                     monlog(null, "Failed to write to probe file: " + e.message);
