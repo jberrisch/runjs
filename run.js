@@ -4,7 +4,8 @@ var cp = require("child_process");
 var fs = require("fs");
 var path = require("path");
 
-var node_bin = "node";
+var node_bin_self = process.platform === "sunos" ? "/shared/software/node6" : "node";
+var node_bin_other = "node";
 var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
 var daemonize_c   = daemonize_bin + ".c";
 var daemonize_mode = 0550;
@@ -525,9 +526,9 @@ function startMonitor(tag, flags, script, args) {
     var cmd = args ? args.slice(0) : [];
     cmd.unshift(script);
 
-    monlog(tag, "Starting process "+node_bin+" "+cmd.join(' '));
+    monlog(tag, "Starting process "+node_bin_other+" "+cmd.join(' '));
 
-    var p = cp.spawn(node_bin, cmd, {
+    var p = cp.spawn(node_bin_other, cmd, {
         env: process.env,
         cwd: process.cwd()
     });
@@ -654,7 +655,7 @@ exports.start = function(tag, flags, script, args, cb) {
         } else {
             // use daemonize to start monitor
             
-            var a = [module.filename, "monitor", tag, JSON.stringify(flags), script];
+            var a = [node_bin_self, module.filename, "monitor", tag, JSON.stringify(flags), script];
             a = a.concat(args);
             var p = cp.spawn(daemonize_bin, a), d = "";
             p.stdout.on('data', function(data) {
