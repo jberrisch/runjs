@@ -547,7 +547,7 @@ function startMonitor(tag, flags, script, args) {
     
         probeTimer = setInterval(function(){
             if(p)
-                p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
+                p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]\n');
         }, probe_timeout);
     }
     
@@ -569,10 +569,11 @@ function startMonitor(tag, flags, script, args) {
             
             var d = data.toString();
             var now = new Date().getTime();
-            d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
-                var delta = now - parseFloat(stamp);
+            d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]\n/g,function(m, stamp, rest){
+                stamp = parseFloat(stamp);
+                var delta = stamp === -1 ? -1 : now - stamp;
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
+                fs.writeSync(fd, shortDateTime(new Date()) + " " + delta+" "+rest+"\n");
                 fs.closeSync(fd);
                 return ''; 
             });
@@ -634,8 +635,8 @@ function startMonitor(tag, flags, script, args) {
 
 exports.reflector = function(on){
     process.stdin.on('data', function(data){
-        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
-            return '[[[[[['+a+']]]]]]';
+        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]\n/g, function(m,a,b){
+            return '[[[[[['+a+']]]]]]\n';
         });
         process.stderr.write(data);
         // parse data and inject status
