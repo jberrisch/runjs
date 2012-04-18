@@ -4,8 +4,7 @@ var cp = require("child_process");
 var fs = require("fs");
 var path = require("path");
 
-var node_bin_self = process.platform === "sunos" ? "/shared/software/node6" : "node";
-var node_bin_other = "node";
+var node_bin = "node";
 var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
 var daemonize_c   = daemonize_bin + ".c";
 var daemonize_mode = 0550;
@@ -526,9 +525,9 @@ function startMonitor(tag, flags, script, args) {
     var cmd = args ? args.slice(0) : [];
     cmd.unshift(script);
 
-    monlog(tag, "Starting process "+node_bin_other+" "+cmd.join(' '));
+    monlog(tag, "Starting process "+node_bin+" "+cmd.join(' '));
 
-    var p = cp.spawn(node_bin_other, cmd, {
+    var p = cp.spawn(node_bin, cmd, {
         env: process.env,
         cwd: process.cwd()
     });
@@ -547,12 +546,8 @@ function startMonitor(tag, flags, script, args) {
         killTimer = setTimeout(killTimeout, kill_timeout);
     
         probeTimer = setInterval(function(){
-            try {
-                if(p)
-                    p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
-            } catch(e) { 
-                monlog(null, "Could not write to input stream: " + e.message);
-            }
+            if(p)
+                p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]\n');
         }, probe_timeout);
     }
     
@@ -574,15 +569,12 @@ function startMonitor(tag, flags, script, args) {
             
             var d = data.toString();
             var now = new Date().getTime();
-            d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
-                var delta = now - parseFloat(stamp);
-                try {
-                    var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                    fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
-                    fs.closeSync(fd);
-                } catch(e) {
-                    monlog(null, "Failed to write to probe file: " + e.message);
-                }
+            d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]\n/g,function(m, stamp, rest){
+                stamp = parseFloat(stamp);
+                var delta = stamp === -1 ? -1 : now - stamp;
+                var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
+                fs.writeSync(fd, shortDateTime(new Date()) + " " + delta+" "+rest+"\n");
+                fs.closeSync(fd);
                 return ''; 
             });
             outfile.write(d);
@@ -643,8 +635,8 @@ function startMonitor(tag, flags, script, args) {
 
 exports.reflector = function(on){
     process.stdin.on('data', function(data){
-        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
-            return '[[[[[['+a+']]]]]]';
+        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]\n/g, function(m,a,b){
+            return '[[[[[['+a+']]]]]]\n';
         });
         process.stderr.write(data);
         // parse data and inject status
@@ -663,7 +655,7 @@ exports.start = function(tag, flags, script, args, cb) {
         } else {
             // use daemonize to start monitor
             
-            var a = [node_bin_self, module.filename, "monitor", tag, JSON.stringify(flags), script];
+            var a = [module.filename, "monitor", tag, JSON.stringify(flags), script];
             a = a.concat(args);
             var p = cp.spawn(daemonize_bin, a), d = "";
             p.stdout.on('data', function(data) {
