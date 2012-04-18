@@ -4,8 +4,6 @@ var fs = require("fs");
 var path = require("path");
 var dgram = require("dgram");
 
-//monlog(module.parent?"module":"process","RunJS module being used in pid:"+process.pid+" args:");//+process.argv.join(' '));
-
 // ------------------------------------------------------------------------------------------
 //    configuration
 // ------------------------------------------------------------------------------------------
@@ -521,7 +519,7 @@ function startMonitor(tag, flags, script, args) {
         cwd: process.cwd()
     });
     
-    monlog(tag, "Started process "+p.pid+" "+node_bin_other+" "+cmd.join(' '));
+    monlog(tag, "Started "+tag+" got pid:"+p.pid+" flags:"+JSON.stringify(flags)+" as:"+node_bin_other+" "+cmd.join(' '));
     
     p.stdin.on('error', function (){
         if(timers.probe)
@@ -561,7 +559,7 @@ function startMonitor(tag, flags, script, args) {
         }, probe_timeout);
     }
     
-    if(tag[0] == '_'){
+    if(flags['-p']){
         if(!flags['-w'])
             setTimeout(startProbing, probe_start);
         else {
@@ -806,8 +804,9 @@ exports.tail = function(out, tag) {
 }
 
 exports.kill = function(tag, out, cb) {
+    monlog("api","Kill called on tag:"+p.tag);          
     exports.find(tag, function(err, p) {
-        if(err)
+        if(err || !p)
             return cb(err);    
             
         if (p.archived)
@@ -839,6 +838,7 @@ exports.kill = function(tag, out, cb) {
             out("archiving: "+tag+" ")
             archiveTag(tag);        
             out("OK\n");
+            monlog("api","Killed tag:"+p.tag+" pid:"+p.pid+" monpid:"+p.monpid);            
             cb();
         }
     });
@@ -846,6 +846,7 @@ exports.kill = function(tag, out, cb) {
 // kill all run.js-like processes and archive everything in the runjs directory
 
 exports.panic = function(out, cb) {
+    monlog("api","Panic called, killing all runjs processes");
     exports.list(false, function(err, rjslist) {
         if (err) return cb(err);
         if(!rjslist || !rjslist.length)
@@ -871,6 +872,7 @@ exports.panic = function(out, cb) {
             out("archiving:"+p.tag+" ")
             archiveTag(p.tag);        
             out("OK\n");
+            monlog("api", "Panic kill and archive "+p.tag+" pid:"+p.pid+" monpid:"+p.monpid);
         }
         psaux(null, function(err, pslist) {
             if (err) return cb(err);
@@ -1088,11 +1090,6 @@ if (args[0].match(/^tail$/i)) {
 if (args[0].match(/^cluster$/i)) {
 }
 
-/*if (args[0].match(/^\-/)) {
-    out('#br ERROR: # Invalid argument: ' + args[0]);
-    return help();
-}*/
-
 var startcmd = ""
 if (args[0].match(/^(start|run)$/i)) startcmd = args.shift();
 
@@ -1110,13 +1107,13 @@ while(args.length){
         process.exit(-1);
         return;
     }
-    flags[k] = n;
+    flags[k] = n || 1;
 }
 var tag = args[0].replace(/.js$/i,"");
 if(flags['-t'])
     tag = flags['-t'];
 
-out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag + "..\n");
+out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag + "\n");
 exports.start(tag, flags, args.shift(), args, function(err, d) {
     if (err)
         out("#br ERROR: # " + err + "\n")
