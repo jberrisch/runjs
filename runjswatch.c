@@ -13,6 +13,17 @@
 #include <sys/types.h>
 
 
+/* Kill the process when it doesn't output anything on its stdout for more */
+/* than N seconds. */
+#define READ_TIMEOUT 10
+
+/* Make sure at least N seconds elapse before restarting a process. */
+#define RESPAWN_MIN_INTERVAL 10
+
+/* When fork() fails, retry after N seconds. */
+#define FORK_RETRY_INTERVAL 10
+
+
 static int err_fd = -1;
 static volatile unsigned int child_exited = 0;
 
@@ -70,14 +81,14 @@ int main(int argc, char* argv[]) {
   int null_fd, alive_fd;
   pid_t watcher_pid;
   int root_pipe_fds[2], temp_fds[2];
-  const struct timeval one_sec = { tv_sec: 1, tv_usec: 0 };
+  const struct timeval read_timeout = { tv_sec: READ_TIMEOUT, tv_usec: 0 };
 
   err_fd = STDERR_FILENO;
 
   /* Check arguments. */
-  if (argc < 2) {
-    fdprintf(err_fd,
-             "Not enough arguments. Usage: `daemonize` command...\n");
+  if (argc < 5 || strcmp("monitor", argv[3]) != 0) {
+    fdprintf(err_fd, "Not enough arguments.\n"
+                     "Usage: `runjswatch` node_bin run.js `monitor` args...\n");
     return 1;
   }
 
@@ -121,8 +132,8 @@ int main(int argc, char* argv[]) {
   if (setsockopt(alive_fd,
                  SOL_SOCKET,
                  SO_RCVTIMEO,
-                 (const void*) &one_sec,
-                 sizeof one_sec) < 0)
+                 (const void*) &read_timeout,
+                 sizeof read_timeout) < 0)
     fatal_error("setsockopt");
 
   /* Create a pipe that will keep the root process alive until the watcher */
@@ -210,6 +221,9 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
+      /* Patch argv[3], replacing "monitor" by "restart" */
+      argv[3] = "restart";
+
       /* Run the main process watcher */
       for (;;) {
         int r, status, did_kill;
@@ -250,11 +264,11 @@ int main(int argc, char* argv[]) {
         now = time(NULL);
         if (now == -1 || last_start_time == -1) {
           /* If either of the time() calls failed, sleep unconditionally */
-          sleep(10);
+          sleep(RESPAWN_MIN_INTERVAL);
         } else {
           time_t delta = now - last_start_time;
-          if (delta > 0 && delta < 10) {
-            sleep(10 - delta);
+          if (delta > 0 && delta < RESPAWN_MIN_INTERVAL) {
+            sleep(RESPAWN_MIN_INTERVAL - delta);
           }
         }
 
@@ -262,7 +276,7 @@ int main(int argc, char* argv[]) {
         child_exited = 0;
         while ((child_pid = fork()) < 0) {
           /* On fork failure, retry after 10 seconds. */
-          sleep(10);
+          sleep(FORK_RETRY_INTERVAL);
         }
 
         if (child_pid == 0) {
