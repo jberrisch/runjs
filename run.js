@@ -1,24 +1,32 @@
 #!/usr/bin/env node
-
 var cp = require("child_process");
 var fs = require("fs");
 var path = require("path");
 var dgram = require("dgram");
 
-var node_bin = "node";
+//monlog(module.parent?"module":"process","RunJS module being used in pid:"+process.pid+" args:");//+process.argv.join(' '));
+
+// ------------------------------------------------------------------------------------------
+//    configuration
+// ------------------------------------------------------------------------------------------
+
+var node_bin_self = process.platform === "sunos" ? "/shared/software/node6" : "node";
+var node_bin_other = "node";
+
 var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"runjswatch";
 var runjswatch_c   = runjswatch_bin + ".c";
-var runjswatch_mode = 0550;
-var kill_timeout  = 10000;
-var probe_timeout = 500;
-var probe_start   = 500;
-var launch_timeout = 60000;
+var runjswatch_mode= 0550;
 var cc_bin         = "gcc"
-var command_poll = 500;
-var appname = "#m runjs# ";
-var NODAEMONIZE = false; // only use true for debugging the monitor code in the cmdline process
+
+var kill_timeout    = 10000;
+var probe_timeout   = 500;
+var probe_start     = 500;
+var launch_timeout  = 60000;
+var command_poll    = 500;
 
 var monitorHost = "localhost";
+
+var appname = "#m runjs# ";
 
 function getTagPaths(tag) {
     var root = process.env.HOME + "/.runjs";
@@ -39,12 +47,8 @@ function getTagPaths(tag) {
     };
 }
 
-function shortDateTime(d) {
-    return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDay() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
-}
-
 // ------------------------------------------------------------------------------------------
-//    console colors
+//    console printing
 // ------------------------------------------------------------------------------------------
 
 var colors = {
@@ -57,8 +61,8 @@ function out() {
         v[i] = String(v[i]).replace(/\#(\w*)\s/g, function(m, a) {
             return "\033[" + (colors[a] || 0) + "m";
         }) + "\033[0m";
+        process.stdout.write(v[i]);
     }
-    console.log.apply(console, v);
 }
 
 function outLen(str) { // decolorize for length
@@ -75,15 +79,12 @@ function monlog(tag, msg) {
     var msg =  "[" + tag + " " + (new Date).toString() + "] " + msg + "\n";
     fs.writeSync(fd, msg);
     fs.closeSync(fd);
-    process.stdout.write(msg);
+    //process.stdout.write(msg);
 }
 
-var uncaught_exception_tag = null;
-process.on("uncaughtException", function(err) {
-    monlog(uncaught_exception_tag, "Monitor Exception "+err.message+"\n"+err.stack);
-    process.exit(-1);
-});
-
+function shortDateTime(d) {
+    return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDay() + " " + d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+}
 // ------------------------------------------------------------------------------------------
 //    tag string ops
 // ------------------------------------------------------------------------------------------
@@ -116,14 +117,11 @@ function killtree9(pid, cb){
         kill9(pid, function (err) {
             if (err) return cb(err);
 
-            var called = 0;
-
+            var called = 0; // poor mans async.js
             pidlist.forEach(function (cpid) {
                 kill9(cpid, function () {
-                    if (++called === pidlist.length) {
-                        // we're done invoke original cb
+                    if (++called === pidlist.length) // we're done invoke original cb
                         cb();
-                    }
                 });
             });
         });
@@ -137,30 +135,19 @@ function childrenOfPid(pid, callback) {
 
         var parents = {};
         stdout.split("\n").slice(1).forEach(function(line) {
-            var columns = line.trim().split(/\s+/g);
-            var ppid = columns[0];
-            var pid = columns[1];
-
-            if (!parents[ppid])
-                parents[ppid] = [pid];
-            else
-                parents[ppid].push(pid);
+            var col = line.trim().split(/\s+/g);
+            (parents[col[0]] || (parents[col[0]] = [])).push(col[1]);
         });
 
         function search(roots) {
             var res = roots.concat();
-            for (var i = 0; i < roots.length; i++) {
-                var children = parents[roots[i]];
-
-                if (children && children.length)
-                    res.push.apply(res, search(children));
+            for (var c, i = 0; i < roots.length; i++) {
+                if ((c = parents[roots[i]]) && c.length)
+                    res.push.apply(res, search(c));
             }
             return res;
         }
-
-        var children = search([pid]);
-
-        callback(null, children);
+        callback(null, search([pid]));
     });
 };
 
@@ -275,12 +262,11 @@ function archiveTag(tag) {
     }
     catch (e) {
         // fatal error in the daemon, what do we do?
-        monlog("#br FATAL ERROR: # Cannot archive tag:" + tag + " from: " + tp.dir + " to: " + tgt + "\n" + e);
-        process.exit(-1);
+        monlog(tag, "#br ERROR: # Cannot archive tag:" + tag + " from: " + tp.dir + " to: " + tgt + "\n" + e);
     }
 }
 
-function createTagPaths(tag, script, cb){
+function createTagPaths(tag, flags, script, cb){
     var tp = getTagPaths(tag);
 
     try {
@@ -412,7 +398,7 @@ function formatTaglist(out, tags){
     for (var c in cols) {
         s += outPad(c, max[c]) + (c == last ? end : mid);
     }
-    out(s);
+    out(s+"\n");
 
     for (var i = 0; i < buf.length; i++) { // build up each process line
         var b = buf[i],
@@ -420,11 +406,12 @@ function formatTaglist(out, tags){
         for (var c in cols) {
             s += outPad(b[c], max[c]) + (c == last ? end : mid);
         }
-        out(s);
+        out(s+"\n");
         if(b.multiline)
-            out(b.multiline);
+            out(b.multiline+"\n");
     }
 }
+
 
 // ------------------------------------------------------------------------------------------
 //    actual monitor function
@@ -437,9 +424,7 @@ function startMonitor(tag, flags, script, args) {
         process.exit(-1);
         return;
     }
-
-    uncaught_exception_tag = tag;
-
+    
     var tp = getTagPaths(tag);
     // open stdout and stderr for write
     var outfile = fs.createWriteStream(tp.out, {
@@ -456,11 +441,12 @@ function startMonitor(tag, flags, script, args) {
 
     var restarting = true;
     var pi = setInterval(commandFilePoll, command_poll);
-
+    var timers = {};
+    
     function stopProcess(sig, restart) {
         restarting = restart;
         clearInterval(pi);
-        pi = null;
+        timers.command = null;
         p.kill(sig);
     }
 
@@ -483,12 +469,14 @@ function startMonitor(tag, flags, script, args) {
                 monlog(tag, "Stop command received, sending SIGTERM");
                 stopProcess('SIGTERM', false);
                 break;
-
             case "restart":
                 monlog(tag, "Restart command received, sending SIGTERM");
                 stopProcess('SIGTERM', true);
                 break;
-
+            case "testexception":
+                // lets do a nice exception 
+                test_the_exception_handling();
+                break;
             case "switch":
                 // lets start ourselves with a new start-rev number, and send ourselves a shutdown signal
                 monlog(tag, "Switch command received, starting new process");
@@ -509,13 +497,12 @@ function startMonitor(tag, flags, script, args) {
         // cant write the file.. have to modify the modifystamp.
         fs.writeFileSync(tp.pid, ""+p.pid);
     }
-
+    
     function gotSig() {
         if(p) {
             p.kill("SIGTERM");
             //archiveTag(tag);
             restarting = false;
-            NODAEMONIZE = false; // otherwise process doesnt die
         }
         else
             process.exit(0);
@@ -527,62 +514,86 @@ function startMonitor(tag, flags, script, args) {
     var cmd = args ? args.slice(0) : [];
     cmd.unshift(script);
 
-    monlog(tag, "Starting process "+node_bin+" "+cmd.join(' '));
-
-    var p = cp.spawn(node_bin, cmd, {
+    //monlog(tag, "Starting process "+node_bin_other+" "+cmd.join(' '));
+ 
+    var p = cp.spawn(node_bin_other, cmd, {
         env: process.env,
         cwd: process.cwd()
     });
+    
+    monlog(tag, "Started process "+p.pid+" "+node_bin_other+" "+cmd.join(' '));
+    
+    p.stdin.on('error', function (){
+        if(timers.probe)
+            clearInterval(timers.probe);
+        timers.probe = 0;
+    });
+    
+    // store stuff to attempt last-ditch restart
+    uncaught_exception_store = {
+        tag: tag,
+        flags: flags,
+        script: script,
+        args: args,
+        tp : tp,
+        pid : p.pid,
+        timers: timers,
+    }
 
     fs.writeFileSync(tp.monpid, ""+process.pid);
     fs.writeFileSync(tp.pid, ""+p.pid);
-
-    var killTimer = null, probeTimer = null, launchTimer = null;
-
+    
     function killTimeout(){
         monlog(tag, "Sending SIGKILL because messageloop appears dead");
         p.kill("SIGKILL");
     }
-
+            
     function startProbing(){
-        killTimer = setTimeout(killTimeout, kill_timeout);
-
-        probeTimer = setInterval(function(){
-            if(p)
-                p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]\n');
+        timers.kill = setTimeout(killTimeout, kill_timeout);
+    
+        timers.probe = setInterval(function(){
+            try {
+                if(p)
+                    p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]');
+            } catch(e) { 
+                monlog(null, "Could not write to input stream: " + e.message);
+            }
         }, probe_timeout);
     }
-
+    
     if(tag[0] == '_'){
         if(!flags['-w'])
             setTimeout(startProbing, probe_start);
         else {
-            launchTimer = setTimeout(function(){
+            timers.launch = setTimeout(function(){
                 monlog(tag, "Sending SIGKILL because waitfor condition timed out");
                 p.kill("SIGKILL");
             },  flags['-lt'] ? parseInt(flags['-lt'], 10)*1000 : launch_timeout);
         }
     }
-
+    
     p.stderr.on('data', function(data) {
-        if(killTimer){
-            clearTimeout(killTimer);
-            killTimer = setTimeout(killTimeout, kill_timeout);
-
+        if(timers.kill){
+            clearTimeout(timers.kill);
+            timers.kill = setTimeout(killTimeout, kill_timeout);
+            
             var d = data.toString();
             var now = new Date().getTime();
-            d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]\n/g,function(m, stamp, rest){
-                stamp = parseFloat(stamp);
-                var delta = stamp === -1 ? -1 : now - stamp;
-                var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                fs.writeSync(fd, shortDateTime(new Date()) + " " + delta+" "+rest+"\n");
-                fs.closeSync(fd);
-                if(monitorHost) {
-                    var udpClient = dgram.createSocket("udp4");
-                    var buf = new Buffer(rest);
-                    udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
-                        udpClient.close();
-                    });
+            d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
+                var delta = now - parseFloat(stamp);
+                try {
+                    var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
+                    fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
+                    fs.closeSync(fd);
+    				if(monitorHost) {
+	                    var udpClient = dgram.createSocket("udp4");
+	                    var buf = new Buffer(rest);
+	                    udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
+	                        udpClient.close();
+	                    });
+	                }
+                } catch(e) {
+                    monlog(null, "Failed to write to probe file: " + e.message);
                 }
                 return ''; 
             });
@@ -592,36 +603,36 @@ function startMonitor(tag, flags, script, args) {
     });
     
     p.stdin.on('error', function() {    
-        if (probeTimer)
-            clearInterval(probeTimer);
-        probeTimer = 0;  
+        if (timers.probe)
+            clearInterval(timers.probe);
+        timers.probe = 0;  
     });
 
     var init_stdout = "";
     p.stdout.on('data', function(data) {
         outfile.write(data);
-        if(flags['-w'] && !probeTimer){ // we need to be watching for start condition to begin probing
+        if(flags['-w'] && !timers.probe){ // we need to be watching for start condition to begin probing
             init_stdout += data.toString();
             if(init_stdout.indexOf(flags['-w']) != -1){
                 monlog(tag, "Probe start wait condition met ("+flags['-w']+")");
-                clearTimeout(launchTimer);
-                startProbing();
+                clearTimeout(timers.launch);
+                startProbing();   
             }
         }
     });
 
     p.on('exit', function(code) {
-        if(killTimer)
-            clearTimeout(killTimer);
-        if(probeTimer)
-            clearTimeout(probeTimer);
-
+        if(timers.kill) 
+            clearTimeout(timers.kill);
+        if(timers.probe)
+            clearTimeout(timers.probe);
+            
         outfile.write("--- Process "+p.pid+" exited with code "+code+".----\n");
         outfile.end();
         if (pi) clearInterval(pi);
         pi = null;
         p = null;
-
+        
         if (restarting){
             try{
                 var restarts = parseInt(fs.readFileSync(tp.restarts), 10) + 1;
@@ -634,11 +645,10 @@ function startMonitor(tag, flags, script, args) {
         }
         else {
             monlog(tag, "Process exit received, archiving. exit code:"+code);
-
+            
             archiveTag(tag);
 
-            if(!NODAEMONIZE)
-                process.exit(0);
+            process.exit(0);
         }
 
     });
@@ -648,10 +658,10 @@ function startMonitor(tag, flags, script, args) {
 //    module API
 // ------------------------------------------------------------------------------------------
 
-exports.reflector = function(){
+exports.reflector = function(on){
     process.stdin.on('data', function(data){
-        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]\n/g, function(m,a,b){
-            return '[[[[[['+a+']]]]]]\n';
+        data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
+            return '[[[[[['+a+']]]]]]';
         });
         process.stderr.write(data);
         // parse data and inject status
@@ -660,28 +670,23 @@ exports.reflector = function(){
 }
 
 exports.start = function(tag, flags, script, args, cb) {
-    createTagPaths(tag, script, function(err){
+    createTagPaths(tag, flags, script, function(err){
         if(err)
-            return cb(err);
+            return cb(err);    
 
-        if (NODAEMONIZE) {
-            startMonitor(tag, flags, script, args);
-            cb();
-        } else {
-            // use runjswatch to start monitor
-
-            var a = [module.filename, "monitor", tag, JSON.stringify(flags), script];
-            a = a.concat(args);
-            var p = cp.spawn(runjswatch_bin, a), d = "";
-            p.stdout.on('data', function(data) {
-                d += data;
-            });
-            p.stderr.on('data', function(data) {
-                d += data;
-            });
-            p.on('exit', function(code) {
-                cb(code != 0 ? code + " " + d : null, d);
-            });
+        var a = [node_bin_self, module.filename, "monitor", tag, JSON.stringify(flags), script];
+        a = a.concat(args);
+        var p = cp.spawn(runjswatch_bin, a), d = "";
+    
+        p.stdout.on('data', function(data) {
+            d += data;
+        });
+        p.stderr.on('data', function(data) {
+            d += data;
+        });
+        p.on('exit', function(code) {
+            cb(code != 0 ? code + " " + d : null, d);
+        });
             /*
             var newargs = [tag, script];
             newargs = newargs.concat(args)
@@ -689,7 +694,6 @@ exports.start = function(tag, flags, script, args, cb) {
                 env: process.env,
                 cwd: process.cwd
             });*/
-        }
     });
     // we can now auto-tail the process if needed
     //    process.exit(0);
@@ -712,8 +716,18 @@ exports.stop = function(tag, out, cb) {
     exports.find(tag, function(err, p) {
         if(err)
             return cb(err);
-
-        out("Stopping process " + p.tag + " with PID " + p.pid + " and monitor " + p.monpid + " ");
+        
+        if(!p.monps){
+            if(p.ps){
+                out("#br Cannot stop monitor without process, calling kill instead " + p.tag+"\n");
+                return exports.kill(tag, out, cb);
+            }
+            out("Process appears #br DEAD # , archiving instead of stopping ..");
+            archiveTag(tag);
+            out("OK\n");
+            return cb(err);
+        }
+        out("#bg Stopping: #by " + p.tag + " # pid:" + p.pid + " monitor:" + p.monpid + " ");
 
         try {
             fs.writeFileSync(p.tp.command, "stop");
@@ -737,7 +751,7 @@ exports.switch = function(tag, out, cb) {
         if(err)
             return cb(err);
 
-        out("Switching tag " + p.tag + " with PID " + p.pid + " and monitor " + p.monpid + " ");
+        out("#bg Switching # tag #by " + p.tag + " # with PID " + p.pid + " and monitor " + p.monpid + " ");
 
         try {
             fs.writeFileSync(p.tp.command, "switch");
@@ -760,8 +774,9 @@ exports.restart = function(tag, cb) {
     exports.find(tag, function(err, p) {
         if(err)
             return cb(err);
-
-        out("Restarting tag " + p.tag + " with PID " + p.pid + " and monitor " + p.monpid + " ");
+            
+        // check if monitor is down, ifso we can only 'restart' it with the same args n all
+        out("#bg Restarting # tag #by " + p.tag + " # with PID " + p.pid + " and monitor " + p.monpid + " ");
 
         try {
             fs.writeFileSync(p.tp.command, "restart");
@@ -780,54 +795,91 @@ exports.restart = function(tag, cb) {
     });
 }
 
-exports.killAll = function(cb) {
-
-}
-
-exports.tail = function(tag) {
+exports.tail = function(out, tag) {
     exports.find(tag, function(err, p) {
         if(err)
-            throw err;
+            return out(err);
         follow(p.tp.out, 20, function(err, entry) {
            process.stdout.write(entry);
         });
     });
 }
 
-// kill all run.js-like processes and wipe out run.js directory
+exports.kill = function(tag, out, cb) {
+    exports.find(tag, function(err, p) {
+        if(err)
+            return cb(err);    
+            
+        if (p.archived)
+            return cb("#br Can't kill archived process\n");
+        
+        var calls = 0;
+        out("#br Killing # " + p.tag+" ")
+        
+        if (p.monpid) {
+            calls++;
+            out("monitor:" + p.monpid +" ");
+            killtree9(p.monpid, function(err, sout) {
+                if (err || sout) out("#br ERROR ");
+                else out("OK ");
+                if(!--calls) end();
+            });
+        }
+        if (p.pid) {
+            out("process:" + p.pid + " ")
+            calls++;
+            killtree9(p.pid, function(err, sout) {
+                if (err || sout) out("#br ERROR ");
+                else out("OK ");
+                if(!--calls) end();
+            });
+        }
+        if(!calls) end();
+        function end(){
+            out("archiving: "+tag+" ")
+            archiveTag(tag);        
+            out("OK\n");
+            cb();
+        }
+    });
+}
+// kill all run.js-like processes and archive everything in the runjs directory
+
 exports.panic = function(out, cb) {
     exports.list(false, function(err, rjslist) {
         if (err) return cb(err);
-
+        if(!rjslist || !rjslist.length)
+            return cb();
+        function killerr(err, sout){
+            if(err && !err.toString().match(/No such process/))
+                out("Kill returned "+err+"\n");
+        }
+        
         for (var i = 0; i < rjslist.length; i++) {
             var p = rjslist[i];
             if (p.archived) continue;
+            out("#br Killing # " + p.tag+" ")
             if (p.monpid) {
-                out("#br Killing monitor: # " + p.tag + " " + p.monpid)
-                killtree9(p.monpid, function(err, sout) {
-                    if (err || sout) out("Kill returned error.");
-                });
+                out("monitor:" + p.monpid +" ");
+                killtree9(p.monpid, killerr);
             }
             if (p.pid) {
-                out("#br Killing process: # " + p.tag + " " + p.pid)
-                killtree9(p.pid, function(err, sout) {
-                    if (err || sout) out("Kill returned.");
-                });
+                out("process:" + p.pid + " ")
+                killtree9(p.pid, killerr);
             }
             // lets archive the process dir
-            out("#br Archiving process: # " + p.tag)
-            archiveTag(p.tag);
+            out("archiving:"+p.tag+" ")
+            archiveTag(p.tag);        
+            out("OK\n");
         }
         psaux(null, function(err, pslist) {
             if (err) return cb(err);
             for (var i = 0; i < pslist.length; i++) {
                 var ps = pslist[i];
-                if (ps.COMMAND && ps.COMMAND.match(/(\s|\/)run\.js\s/) && ps.PID != process.pid && !ps.COMMAND.match(/panic$/)) {
+                if (ps.COMMAND && ps.COMMAND.match(/runjswatch|(\s|\/)run\.js\s/) && ps.PID != process.pid && !ps.COMMAND.match(/panic$|clean$/)) {
                     //console.log(process.pid, ps.PID);
-                    out("#br Wayward run.js killing: # " + ps.PID + ' ' + ps.COMMAND)
-                    killtree9(ps.PID,function(err,sout){
-                        if (err || sout) out("Kill returned.");
-                    });
+                    out("#br Killing # "+ps.COMMAND+"(" + ps.PID + ")" )
+                    killtree9(ps.PID, killerr);
                 }
             }
             cb();
@@ -840,7 +892,7 @@ exports.list = function(wantArchived, cb) {
     var tp = getTagPaths("");
     fs.readdir(tp.root, function(err, dir) {
         if (err) return cb(err);
-
+        
         // for each directory lets list all files to build up our process list
         var cbcount = 0, cbtotal = 0, list = [];
 
@@ -863,17 +915,29 @@ exports.list = function(wantArchived, cb) {
     });
 }
 
+if (module.parent) // are we being used as a module?
+    return;
+    
+// ------------------------------------------------------------------------------------------
+// exception handler to print exception in log
+// ------------------------------------------------------------------------------------------
+
+var uncaught_exception_store = null;
+process.on("uncaughtException", function(err) {
+    
+    var s = uncaught_exception_store;
+    monlog(s?s.tag:"", "Monitor Exception "+process.pid+" "+err.message+" higher powers required\n"+err.stack);
+    process.exit(-1);
+});
+    
 // ------------------------------------------------------------------------------------------
 //    Commandline implementation (calls the API)
 // ------------------------------------------------------------------------------------------
 
-if (module.parent) // are we being used as a module?
-    return;
-
-// check if runjswatch exists, otherwise compile it
+// check if daemonize exists, otherwise compile it
 if(!path.existsSync(runjswatch_bin)){
-    out("#br Runjswatch binary is not available, attempting to build it....\n");
-    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v","-Wall","-Os"]);
+    out("#br Runjswatch is not available, attempting to build it....\n");
+    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v"]);
 
     function stdoutw(d){process.stdout.write(d);}
     p.stdout.on('data',stdoutw);
@@ -881,16 +945,16 @@ if(!path.existsSync(runjswatch_bin)){
 
     p.on('exit',function(code){
         if(code)
-            out("#br Runjswatch build failed");
+            out("#br Runjswatch build failed\n");
         else{
             if(!path.existsSync(runjswatch_bin))
-                out("\nRunjswatch built, but binary still not found.\n");
+                out("\Runjswatch built, but binary still not found.\n");
             else{
                 try{
                     fs.chmodSync(runjswatch_bin, runjswatch_mode);
-                    out("\nRunjswatch built #bg OK #\n");
+                    out("\Runjswatch built #bg OK # \n");
                 }catch(e){
-                    out("\nRunjswatch built, but chmod failed\n");
+                    out("\Runjswatch built, but chmod failed\n");
                 }
             }
         }
@@ -940,25 +1004,35 @@ if (args.length == 0 || args[0].match(/^(\-l|list|listall)/i)) {
     return;
 }
 
-if(args[0].match(/^(monitor|reload)$/i)){
-    
-    if(args[0].match(/^reload$/i)){
-        // someone is restarting us, what do we do?
-        // we have to make sure all old processes are dead, entirely.
-        
-    } else next();
-    
-    function next(){
-        if(!args[1] || !args[2] || !args[3]){
-            out('#brERROR: # please call internal monitor function correctly if you must: [tag] [flagsjson] [script] [args]');
-            return process.exit(-1);
-        } else {
-            createTagPaths(args[1], args[2], function(err){
-                if (err) out("#br ERROR: # " + err + "\n");
-                return startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
+if(args[0].match(/^monitor$|^reload:/i)){
+    if(!args[1] || !args[2] || !args[3]){
+        out('#brERROR: # please call internal monitor function correctly if you must: [tag] [flagsjson] [script] [args]');
+        return process.exit(0);
+    } 
+    if(args[0].match(/^reload:/i)){
+        monlog(args[1], "Monitor died hard, cleaning up. Last output in crash:\n-------------- Start dump ------------\n" + args[0].slice(7)+"\n--------------- End dump --------------");
+        var s = "";
+        exports.kill(args[1], function(d){
+            s += d;
+        }, function(err){
+            if(err)
+                monlog(args[1], "Reload kill failed with: "+err);
+            else 
+                monlog(args[1], "Reload kill command returned:"+s.replace(/\n/g,""));
+            createTagPaths(args[1], args[2], args[3], function(err){
+                if (err) monlog(args[1], "Reload createPaths failed with "+err)
+                startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
             });
-        } 
+        })
+    } else {
+        createTagPaths(args[1], args[2], args[3], function(err){
+            startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
+        });
     }
+    // the keepalive for runjswatch
+    setInterval(function(){
+       process.stdout.write("1");
+    }, 500);
     return;
 }
 
@@ -985,7 +1059,7 @@ if (args[0].match(/^switch/i)) {
 
 if (args[0].match(/^restart/i)) {
     return exports.restart(args[1],
-    	function(err) {
+		function(err) {
         	if (err) out("#br ERROR: # " + err+"\n");
     	});
 }
@@ -1042,13 +1116,10 @@ var tag = args[0].replace(/.js$/i,"");
 if(flags['-t'])
     tag = flags['-t'];
 
-out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag + "..");
+out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag + "..\n");
 exports.start(tag, flags, args.shift(), args, function(err, d) {
     if (err)
         out("#br ERROR: # " + err + "\n")
 
-    out("Daemonized with " + d + "\n");
-
     process.exit(0);
 });
-

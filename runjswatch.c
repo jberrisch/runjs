@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+//#define DEBUG 1
 
 /* Kill the process when it doesn't output anything on its stdout for more */
 /* than N seconds. */
@@ -23,6 +24,8 @@
 /* When fork() fails, retry after N seconds. */
 #define FORK_RETRY_INTERVAL 10
 
+/* stderr to monitor error passthrough */
+#define ERR_SIZE 1024
 
 static int err_fd = -1;
 static volatile unsigned int child_exited = 0;
@@ -108,10 +111,6 @@ int main(int argc, char* argv[]) {
     fatal_error("open");
   if (dup2(null_fd, STDIN_FILENO) < 0)
     fatal_error("dup2");
-  if (dup2(null_fd, STDOUT_FILENO) < 0)
-    fatal_error("dup2");
-  if (dup2(null_fd, STDERR_FILENO) < 0)
-    fatal_error("dup2");
   if (close(null_fd) < 0)
     fatal_error("close");
 
@@ -123,6 +122,8 @@ int main(int argc, char* argv[]) {
   if (set_cloexec(temp_fds[0]) < 0)
     fatal_error("set_cloexec");
   if (dup2(temp_fds[1], STDOUT_FILENO) < 0)
+    fatal_error("dup2");
+  if (dup2(temp_fds[1], STDERR_FILENO) < 0)
     fatal_error("dup2");
   if (close(temp_fds[1]) < 0)
     fatal_error("close");
@@ -146,7 +147,7 @@ int main(int argc, char* argv[]) {
 
   /* Fork for the first time. This splits off the root process from the */
   /* watcher daemon. */
-  watcher_pid = fork();
+  watcher_pid = fork(); 
   if (watcher_pid < 0)
     fatal_error("fork");
 
@@ -181,7 +182,7 @@ int main(int argc, char* argv[]) {
     struct sigaction chld_action, chld_action_orig;
 
     /* We are the watcher daemon. Close the main process end of the pipe. */
-    if (close(root_pipe_fds[0]) < 0)
+   if (close(root_pipe_fds[0]) < 0)
       fatal_error("close");
 
     /* Make the watcher daemon session group leader. This can fail only if */
@@ -207,10 +208,12 @@ int main(int argc, char* argv[]) {
       time_t last_start_time = time(NULL);
 
       /* Close the error fd. */
+#ifndef DEBUG
       if (close(err_fd) < 0) {
         write(root_pipe_fds[1], "x", 1);
         fatal_error("close");
       }
+#endif
 
       /* Write 1 and close the signal pipe. If the child fork doesn't write */
       /* anything to the signal pipe, this will tell the root process that */
@@ -222,24 +225,39 @@ int main(int argc, char* argv[]) {
       }
 
       /* Patch argv[3], replacing "monitor" by "restart" */
-      argv[3] = "restart";
+#define COMMAND "reload:"
+      char arg_buf[ERR_SIZE + sizeof COMMAND] = COMMAND;
+      argv[3] = arg_buf;
+      char* buf = arg_buf + sizeof COMMAND - 1;
+#undef COMMAND
 
       /* Run the main process watcher */
       for (;;) {
         int r, status, did_kill;
         time_t now;
-
+        int offset = 0;
+        memset(buf, 0, ERR_SIZE+1);
         do {
-          char buf[16];
           /* Try to read from the alive socket. It has a timeout of 1 second. */
-          r = recv(alive_fd, buf, sizeof buf, 0);
+          r = recv(alive_fd, &buf[offset], ERR_SIZE - offset, 0);
+          if(r > 0){
+            offset += r;
+            if(offset >= ERR_SIZE)
+                offset = 0;
+            }
         } while (r > 0);
 
         if (!child_exited) {
           kill(child_pid, SIGKILL);
           did_kill = 1;
+#define KILLMSG "!! runjswatch:stdout/err dead, killed child !!"
+          memcpy( (offset < ERR_SIZE - sizeof KILLMSG - 1) ? &buf[offset] : buf, KILLMSG, sizeof KILLMSG - 1);
+#undef KILLMSG
         } else {
           did_kill = 0;
+#define KILLMSG "!! runjswatch:child died all by itself !!"
+          memcpy( (offset < ERR_SIZE - sizeof KILLMSG - 1) ? &buf[offset] : buf, KILLMSG, sizeof KILLMSG - 1);
+#undef KILLMSG          
         }
 
         do {
@@ -257,6 +275,9 @@ int main(int argc, char* argv[]) {
             (WIFSIGNALED(status) && (WTERMSIG(status) == SIGKILL ||
                                      WTERMSIG(status) == SIGINT ||
                                      WTERMSIG(status) == SIGHUP)))) {
+#ifdef DEBUG          
+            fdprintf(err_fd, "Process exited cleanly, terminating watch %d %08x.\n",did_kill, status) ;
+#endif                                               
           return 0;
         }
 
@@ -267,7 +288,10 @@ int main(int argc, char* argv[]) {
           sleep(RESPAWN_MIN_INTERVAL);
         } else {
           time_t delta = now - last_start_time;
-          if (delta > 0 && delta < RESPAWN_MIN_INTERVAL) {
+          if (delta >= 0 && delta < RESPAWN_MIN_INTERVAL) {
+#ifdef DEBUG          
+            fdprintf(err_fd, "Process exited too quickly, respawning after %d sec.\n", RESPAWN_MIN_INTERVAL - delta);
+#endif                      
             sleep(RESPAWN_MIN_INTERVAL - delta);
           }
         }
@@ -282,6 +306,10 @@ int main(int argc, char* argv[]) {
         if (child_pid == 0) {
           signal(SIGPIPE, SIG_DFL);
           sigaction(SIGCHLD, &chld_action_orig, NULL);
+
+#ifdef DEBUG          
+          fdprintf(err_fd, "Executing %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4]);
+#endif          
           execvp(argv[1], &argv[1]);
           return 1;
         }
