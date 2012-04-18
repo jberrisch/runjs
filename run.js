@@ -6,9 +6,9 @@ var path = require("path");
 var dgram = require("dgram");
 
 var node_bin = "node";
-var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
-var daemonize_c   = daemonize_bin + ".c";
-var daemonize_mode = 0550;
+var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"runjswatch";
+var runjswatch_c   = runjswatch_bin + ".c";
+var runjswatch_mode = 0550;
 var kill_timeout  = 10000;
 var probe_timeout = 500;
 var probe_start   = 500;
@@ -437,9 +437,9 @@ function startMonitor(tag, flags, script, args) {
         process.exit(-1);
         return;
     }
-    
+
     uncaught_exception_tag = tag;
-    
+
     var tp = getTagPaths(tag);
     // open stdout and stderr for write
     var outfile = fs.createWriteStream(tp.out, {
@@ -509,7 +509,7 @@ function startMonitor(tag, flags, script, args) {
         // cant write the file.. have to modify the modifystamp.
         fs.writeFileSync(tp.pid, ""+p.pid);
     }
-    
+
     function gotSig() {
         if(p) {
             p.kill("SIGTERM");
@@ -538,21 +538,21 @@ function startMonitor(tag, flags, script, args) {
     fs.writeFileSync(tp.pid, ""+p.pid);
 
     var killTimer = null, probeTimer = null, launchTimer = null;
-    
+
     function killTimeout(){
         monlog(tag, "Sending SIGKILL because messageloop appears dead");
         p.kill("SIGKILL");
     }
-            
+
     function startProbing(){
         killTimer = setTimeout(killTimeout, kill_timeout);
-    
+
         probeTimer = setInterval(function(){
             if(p)
                 p.stdin.write('[[[[[['+(new Date().getTime())+']]]]]]\n');
         }, probe_timeout);
     }
-    
+
     if(tag[0] == '_'){
         if(!flags['-w'])
             setTimeout(startProbing, probe_start);
@@ -563,12 +563,12 @@ function startMonitor(tag, flags, script, args) {
             },  flags['-lt'] ? parseInt(flags['-lt'], 10)*1000 : launch_timeout);
         }
     }
-    
+
     p.stderr.on('data', function(data) {
         if(killTimer){
             clearTimeout(killTimer);
             killTimer = setTimeout(killTimeout, kill_timeout);
-            
+
             var d = data.toString();
             var now = new Date().getTime();
             d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]\n/g,function(m, stamp, rest){
@@ -596,7 +596,7 @@ function startMonitor(tag, flags, script, args) {
             clearInterval(probeTimer);
         probeTimer = 0;  
     });
-    
+
     var init_stdout = "";
     p.stdout.on('data', function(data) {
         outfile.write(data);
@@ -605,23 +605,23 @@ function startMonitor(tag, flags, script, args) {
             if(init_stdout.indexOf(flags['-w']) != -1){
                 monlog(tag, "Probe start wait condition met ("+flags['-w']+")");
                 clearTimeout(launchTimer);
-                startProbing();   
+                startProbing();
             }
         }
     });
 
     p.on('exit', function(code) {
-        if(killTimer) 
+        if(killTimer)
             clearTimeout(killTimer);
         if(probeTimer)
             clearTimeout(probeTimer);
-            
+
         outfile.write("--- Process "+p.pid+" exited with code "+code+".----\n");
         outfile.end();
         if (pi) clearInterval(pi);
         pi = null;
         p = null;
-        
+
         if (restarting){
             try{
                 var restarts = parseInt(fs.readFileSync(tp.restarts), 10) + 1;
@@ -634,7 +634,7 @@ function startMonitor(tag, flags, script, args) {
         }
         else {
             monlog(tag, "Process exit received, archiving. exit code:"+code);
-            
+
             archiveTag(tag);
 
             if(!NODAEMONIZE)
@@ -662,17 +662,17 @@ exports.reflector = function(){
 exports.start = function(tag, flags, script, args, cb) {
     createTagPaths(tag, script, function(err){
         if(err)
-            return cb(err);    
-            
+            return cb(err);
+
         if (NODAEMONIZE) {
             startMonitor(tag, flags, script, args);
             cb();
         } else {
-            // use daemonize to start monitor
-            
+            // use runjswatch to start monitor
+
             var a = [module.filename, "monitor", tag, JSON.stringify(flags), script];
             a = a.concat(args);
-            var p = cp.spawn(daemonize_bin, a), d = "";
+            var p = cp.spawn(runjswatch_bin, a), d = "";
             p.stdout.on('data', function(data) {
                 d += data;
             });
@@ -840,7 +840,7 @@ exports.list = function(wantArchived, cb) {
     var tp = getTagPaths("");
     fs.readdir(tp.root, function(err, dir) {
         if (err) return cb(err);
-        
+
         // for each directory lets list all files to build up our process list
         var cbcount = 0, cbtotal = 0, list = [];
 
@@ -870,10 +870,10 @@ exports.list = function(wantArchived, cb) {
 if (module.parent) // are we being used as a module?
     return;
 
-// check if daemonize exists, otherwise compile it
-if(!path.existsSync(daemonize_bin)){
-    out("#br Daemonize binary is not available, attempting to build it....\n");
-    var p = cp.spawn(cc_bin, [daemonize_c,"-o",daemonize_bin,"-v"]);
+// check if runjswatch exists, otherwise compile it
+if(!path.existsSync(runjswatch_bin)){
+    out("#br Runjswatch binary is not available, attempting to build it....\n");
+    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v","-Wall","-Os"]);
 
     function stdoutw(d){process.stdout.write(d);}
     p.stdout.on('data',stdoutw);
@@ -881,16 +881,16 @@ if(!path.existsSync(daemonize_bin)){
 
     p.on('exit',function(code){
         if(code)
-            out("#br Daemonize build failed");
+            out("#br Runjswatch build failed");
         else{
-            if(!path.existsSync(daemonize_bin))
-                out("\nDaemonize built, but binary still not found.\n");
+            if(!path.existsSync(runjswatch_bin))
+                out("\nRunjswatch built, but binary still not found.\n");
             else{
                 try{
-                    fs.chmodSync(daemonize_bin, daemonize_mode);
-                    out("\nDaemonize built #bg OK #\n");
+                    fs.chmodSync(runjswatch_bin, runjswatch_mode);
+                    out("\nRunjswatch built #bg OK #\n");
                 }catch(e){
-                    out("\nDaemonize built, but chmod failed\n");
+                    out("\nRunjswatch built, but chmod failed\n");
                 }
             }
         }
