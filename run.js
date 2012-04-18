@@ -74,7 +74,7 @@ function outPad(str, len, pad) { // decolorized padder
 function monlog(tag, msg) {
     var paths = getTagPaths(tag);
     var fd = fs.openSync(paths.monlog, "a+");
-    var msg =  "[" + tag + " " + (new Date).toString() + "] " + msg + "\n";
+    var msg =  "[" + tag + " "+process.pid+" " + (new Date).toString() + "] " + msg + "\n";
     fs.writeSync(fd, msg);
     fs.closeSync(fd);
     //process.stdout.write(msg);
@@ -804,7 +804,7 @@ exports.tail = function(out, tag) {
 }
 
 exports.kill = function(tag, out, cb) {
-    monlog("api","Kill called on tag:"+p.tag);          
+    monlog("api","Kill called on tag:" + tag);          
     exports.find(tag, function(err, p) {
         if(err || !p)
             return cb(err);    
@@ -1013,14 +1013,9 @@ if(args[0].match(/^monitor$|^reload:/i)){
     } 
     if(args[0].match(/^reload:/i)){
         monlog(args[1], "Monitor died hard, cleaning up. Last output in crash:\n-------------- Start dump ------------\n" + args[0].slice(7)+"\n--------------- End dump --------------");
-        var s = "";
-        exports.kill(args[1], function(d){
-            s += d;
-        }, function(err){
+        exports.kill(args[1], function(d){}, function(err){
             if(err)
                 monlog(args[1], "Reload kill failed with: "+err);
-            else 
-                monlog(args[1], "Reload kill command returned:"+s.replace(/\n/g,""));
             createTagPaths(args[1], args[2], args[3], function(err){
                 if (err) monlog(args[1], "Reload createPaths failed with "+err)
                 startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
