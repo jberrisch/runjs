@@ -1,5 +1,5 @@
 var probes = require("./probes");
-
+var runjs = require("./run");
 var spawn = require('child_process').spawn;
 
 function getOutput(cmd, args, callback) {
@@ -20,7 +20,7 @@ function getOutput(cmd, args, callback) {
     });
 }
 
-probes.define("unix/uptime", 0, function(callback) {
+probes.define("uptime", 0, function(callback) {
     getOutput("uptime", [], function(err, output) {
         if(err)
             return callback(err);
@@ -102,7 +102,7 @@ function readableSizeToByteSize(s) {
         return parseInt(s, 10) * 1024 * 1024;
 }
 
-probes.define("unix/stats", 0, function(callback) {
+probes.define("stats", 0, function(callback) {
     if(process.platform === "sunos") {
         getOutput("prstat", ["-Z", "0", "1"], function(err, output) {
             if(err)
@@ -144,7 +144,7 @@ probes.define("unix/stats", 0, function(callback) {
     }
 });
 
-probes.define("unix/df", 0, function(callback) {
+probes.define("df", 0, function(callback) {
     getOutput("df", [process.platform === "sunos" ? "-B1024" : "-k"], function(err, output) {
         if(err)
             return callback(err);
@@ -159,4 +159,5 @@ probes.define("unix/df", 0, function(callback) {
     });
 });
 
-probes.intervalProber("unix", 30000, true);
+probes.intervalProber(process.argv[2] || "unix", 30000, true);
+runjs.reflector();

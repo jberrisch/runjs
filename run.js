@@ -3,6 +3,7 @@
 var cp = require("child_process");
 var fs = require("fs");
 var path = require("path");
+var dgram = require("dgram");
 
 var node_bin = "node";
 var daemonize_bin = module.filename.replace(/run\.js$/,"")+"daemonize";
@@ -16,6 +17,8 @@ var cc_bin         = "gcc"
 var command_poll = 500;
 var appname = "#m runjs# ";
 var NODAEMONIZE = false; // only use true for debugging the monitor code in the cmdline process
+
+var monitorHost = "localhost";
 
 function getTagPaths(tag) {
     var root = process.env.HOME + "/.runjs";
@@ -575,6 +578,11 @@ function startMonitor(tag, flags, script, args) {
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
                 fs.writeSync(fd, shortDateTime(new Date()) + " " + delta+" "+rest+"\n");
                 fs.closeSync(fd);
+                var udpClient = dgram.createSocket("udp4");
+                var buf = new Buffer(rest);
+                udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
+                    udpClient.close();
+                });
                 return ''; 
             });
             outfile.write(d);
@@ -633,7 +641,7 @@ function startMonitor(tag, flags, script, args) {
 //    module API
 // ------------------------------------------------------------------------------------------
 
-exports.reflector = function(on){
+exports.reflector = function(){
     process.stdin.on('data', function(data){
         data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]\n/g, function(m,a,b){
             return '[[[[[['+a+']]]]]]\n';
