@@ -280,7 +280,6 @@ function archiveTag(tag) {
     }
 }
 
-
 function createTagPaths(tag, script, cb){
     var tp = getTagPaths(tag);
 
@@ -904,89 +903,97 @@ var args = process.argv.slice(2);
 
 function help() {
     var n = "#m " + appname + "# "
-    out("usage: " + n + " #bg [action] #by [tag] #bc [script] #bb [script arguments] ");
-    out("")
-    out(n + " is the easiest way to run node.js scripts as daemons and monitor them");
-    out("a tag is a short identifier you can use to name and select a process, if omitted the script name is the tag");
-    out("")
-    out(n + " #bg [list] #w list running processes with latest stdout/err")
-    out(n + " #bg run #by [tag] #bb [-w:'waitforstring'] #bc jsfile[.js] #bb [arguments] #w starts a process and directly tails it")
-    out(n + " #bg cluster #br nodes # #by [tag] #bc jsfile[.js] #bb [arguments] #w starts a cluster with n nodes")
-    out(n + " #bg start #by [tag] #bc jsfile[.js] #bb [arguments] #w starts a process")
-    out(n + " #bg stop #by tag #w stop particular process")
-    out(n + " #bg stopall #w stop all processes")
-    out(n + " #bg switch #by tag #w start process again and trigger old one to shutdown with a signal")
-    out(n + " #bg panic #w hardkill anything related to "+appname)
-    out(n + " #bg tail #by tag #w tail process stdout/err")
-    out(n + " #bg cleanup #w cleans up stopped processes logfiles")
-    out(n + " #bg help #w show this help")
-    out("")
+    out("usage: " + n + " #bg [action] #by [tag] #bc [script] #bb [script arguments] \n")
+    out("\n")
+    out(n + " is the easiest way to run node.js scripts as daemons and monitor them\n")
+    out("a tag is a short identifier you can use to name and select a process, it is the script filename by default\n")
+    out("\n")
+    out(n + " calling runjs without arguments list running processes with latest stdout/err\n")
+    out(n + " #by [flags] #bc jsfile[.js] #bb [arguments] #w start a process with runjs, the tag is the jsfile name\n")
+    out("flags: #by -s # show stdout/err immediately after startup\n")
+    out("       #by -n:nodebin # start stuff with another node binary\n")
+    out("       #by -c:clusternodes # how many clusternodes to start\n")
+    out("       #by -w:waitfor # the process startup is verified with a waitfor string\n")
+    out("       #by -p # probe the process to see if its alive using stdin/out probing\n")
+    out("       #by -t:tag # provide process tag explicitly, normally its the filename of your .js file\n")
+    out(n + " #bg stop #by tag #w stop particular process nicely\n")
+    out(n + " #bg kill #by tag #w kills a particular process with kill -9\n")
+    out(n + " #bg switch #by tag #w start process again and trigger old one to shutdown with a signal\n")
+    out(n + " #bg clean #w kills everything and cleans up runjs state" + appname+"\n")
+    out(n + " #bg show #by tag #w shows process stdout/err\n")
+    out(n + " #bg help #w show this help\n")
+    out("\n")
 }
-
-if (args.length == 1 && args[0].match(/^\-+h|^help/)) {
+ 
+if (args.length == 1 && args[0].match(/^[\-\/]*([h\?]|help)$/)) {
     return help();
 }
 
 if (args.length == 0 || args[0].match(/^(\-l|list|listall)/i)) {
     exports.list(args[0] && args[0].match(/^listall$/i), function(err, tags) {
         if (err)
-            return out("#br ERROR # trying to list "+appname+" processes: " + err);
+            return out("#br ERROR # trying to list "+appname+" processes: " + err+"\n");
         if(!tags || !tags.length)
-            return out("No "+appname+" processes running");
+            return out("No "+appname+" processes running\n");
         formatTaglist(out, tags);
     });
     return;
 }
 
-if(args[0].match(/^monitor$/i)){
-    if(!args[1] || !args[2] || !args[3]){
-        out('#brERROR: # please call internal monitor function correctly if you must: [tag] [flagsjson] [script] [args]');
-        return process.exit(-1);
-    } else {
-        createTagPaths(args[1], args[2], function(err){
-            if (err) out("#br ERROR: # " + err);
-            return startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
-        });
+if(args[0].match(/^(monitor|reload)$/i)){
+    
+    if(args[0].match(/^reload$/i)){
+        // someone is restarting us, what do we do?
+        // we have to make sure all old processes are dead, entirely.
+        
+    } else next();
+    
+    function next(){
+        if(!args[1] || !args[2] || !args[3]){
+            out('#brERROR: # please call internal monitor function correctly if you must: [tag] [flagsjson] [script] [args]');
+            return process.exit(-1);
+        } else {
+            createTagPaths(args[1], args[2], function(err){
+                if (err) out("#br ERROR: # " + err + "\n");
+                return startMonitor(args[1], JSON.parse(args[2]), args[3], args.slice(4));
+            });
+        } 
     }
     return;
 }
 
 if (args[0].match(/^stop$/i)) {
-    return exports.stop(args[1],
-        function(data){
-            process.stdout.write(data);
-        },
+    return exports.stop(args[1],out,
         function(err) {
-            if (err) out("#br ERROR: # " + err)
+            if (err) out("#br ERROR: # " + err+"\n")
+        });
+}
+
+if (args[0].match(/^kill$/i)) {
+    return exports.kill(args[1], out, 
+        function(err) {
+            if (err) out("#br ERROR: # " + err+"\n")
         });
 }
 
 if (args[0].match(/^switch/i)) {
-    return exports.switch(args[1],
-        function(data){
-            process.stdout.write(data);
-        },
+    return exports.switch(args[1],out,
         function(err) {
-            if (err) out("#br ERROR: # " + err);
+            if (err) out("#br ERROR: # " + err+"\n");
         });
 }
 
 if (args[0].match(/^restart/i)) {
     return exports.restart(args[1],
-		function(err) {
-        	if (err) out("#br ERROR: # " + err);
+    	function(err) {
+        	if (err) out("#br ERROR: # " + err+"\n");
     	});
 }
 
-if (args[0].match(/^stopall$/i)) {
-    // Not implemented
-    console.log("Not implemented");
-}
-
-if (args[0].match(/^panic$/i)) {
+if (args[0].match(/^(?:clear|clean|cleanup|panic)$/i)) {
     return exports.panic(out, function(err) {
-        if (err) out("#br ERROR: # " + err)
-        else out("Panic cleanup #bg OK# ");
+        if (err) out("#br ERROR: # " + err+"\n")
+        else out("Cleanup #bg OK# "+"\n");
     });
 }
 
@@ -999,8 +1006,8 @@ if (args[0].match(/^monlog/i)) {
 }
 
 if (args[0].match(/^tail$/i)) {
-    return exports.tail(args[1], function(err) {
-        if (err) out("#br ERROR: # " + err)
+    return exports.tail(args[1], out, function(err) {
+        if (err) out("#br ERROR: # " + err +"\n")
     });
 }
 
@@ -1015,11 +1022,8 @@ if (args[0].match(/^cluster$/i)) {
 var startcmd = ""
 if (args[0].match(/^(start|run)$/i)) startcmd = args.shift();
 
-var tag = null;
-if (args[0].match(/^\[/)) tag = args.shift().replace(/[^a-zA-Z0-9_]/g, "");
-
 // parse out monitor flags
-var flags = {};
+var flags = { };
 while(args.length){
     if(args[0] && args[0].charAt(0) != '-') break;
     var n = args.shift(), k = '';
@@ -1028,23 +1032,23 @@ while(args.length){
         return '';
     });
     if(!k){
-        out('#br ERROR: # Invalid argument: ' + args[0]); 
+        out('#br ERROR: # Invalid argument: ' + args[0] + "\n"); 
         process.exit(-1);
         return;
     }
     flags[k] = n;
 }
-if(!tag) tag = args[0];
+var tag = args[0].replace(/.js$/i,"");
+if(flags['-t'])
+    tag = flags['-t'];
 
-out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag);
+out(appname + " starting script: #bc " + args[0] + " # with tag #by " + tag + "..");
 exports.start(tag, flags, args.shift(), args, function(err, d) {
     if (err)
-        out("#br ERROR: # " + err)
-    else if (startcmd == 'run') { // go tail stdout immediately
-        return;
-    }
-    else out("Daemonized with " + d);
+        out("#br ERROR: # " + err + "\n")
 
-    if (!NODAEMONIZE)
-        process.exit(0);
+    out("Daemonized with " + d + "\n");
+
+    process.exit(0);
 });
+
