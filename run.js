@@ -513,13 +513,13 @@ function startMonitor(tag, flags, script, args) {
     cmd.unshift(script);
 
     //monlog(tag, "Starting process "+node_bin_other+" "+cmd.join(' '));
- 
-    var p = cp.spawn(node_bin_other, cmd, {
+    var nodebin = flags['-n']?flags['-n']:node_bin_other;
+    var p = cp.spawn(nodebin, cmd, {
         env: process.env,
         cwd: process.cwd()
     });
     
-    monlog(tag, "Started "+tag+" got pid:"+p.pid+" flags:"+JSON.stringify(flags)+" as:"+node_bin_other+" "+cmd.join(' '));
+    monlog(tag, "Started "+tag+" got pid:"+p.pid+" flags:"+JSON.stringify(flags)+" as:"+nodebin+" "+cmd.join(' '));
     
     p.stdin.on('error', function (){
         if(timers.probe)
