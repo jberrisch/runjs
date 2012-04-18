@@ -578,16 +578,24 @@ function startMonitor(tag, flags, script, args) {
                 var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
                 fs.writeSync(fd, shortDateTime(new Date()) + " " + delta+" "+rest+"\n");
                 fs.closeSync(fd);
-                var udpClient = dgram.createSocket("udp4");
-                var buf = new Buffer(rest);
-                udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
-                    udpClient.close();
-                });
+                if(monitorHost) {
+                    var udpClient = dgram.createSocket("udp4");
+                    var buf = new Buffer(rest);
+                    udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
+                        udpClient.close();
+                    });
+                }
                 return ''; 
             });
             outfile.write(d);
         } else
             outfile.write(data);
+    });
+    
+    p.stdin.on('error', function() {    
+        if (probeTimer)
+            clearInterval(probeTimer);
+        probeTimer = 0;  
     });
     
     var init_stdout = "";
