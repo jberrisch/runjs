@@ -40,8 +40,13 @@ server.on("message", function(msg, rinfo) {
     }
 });
 
-process.on("exit", function() {
-    monitor.kill();
-});
+function kill() {
+    monitor.kill("SIGKILL");
+    console.log("BYE");
+    process.exit(0);
+}
+process.on("SIGINT", kill);
+process.on("SIGKILL", kill);
+process.on("SIGTERM", kill);
 
 server.bind(port, host);
