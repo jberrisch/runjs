@@ -161,13 +161,15 @@ probes.define("df", 0, function(callback) {
 
 probes.define("run.js", 0, function(callback) {
     runjs.list(false, function(err, processes) {
-        processes.forEach(function(process) {
+        processes = processes.filter(function(process) {
+            if(process.tag == "unix") return false;
             delete process.tp;
             delete process.out;
             process.status = process.ps ? "OK" : "FAIL";
             process.monStatus = process.monps ? "OK" : "FAIL";
             delete process.monps;
             delete process.ps.COMMAND;
+            return true;
         });
         callback(null, processes);
     });
