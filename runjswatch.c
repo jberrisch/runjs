@@ -90,7 +90,12 @@ int main(int argc, char* argv[]) {
 
   /* Check arguments. */
   if (argc < 5 || strcmp("monitor", argv[3]) != 0) {
-    fdprintf(err_fd, "Not enough arguments.\n"
+    fdprintf(err_fd, "this command is used by run.js and should not be manually started.\n"
+                     "runjswatch is a few lines of static memory C that watches the run.js monitor, and in the case of an unlikely crash, restarts it.\n"
+                     "Run.js in turn watches the process you want safely running in the background with the lowest probability of downtime.\n"
+                     "Run.js is itself a node program which has millions of lines of C effectively, and a ton of features. Run.js crashes are unlikely, but not impossible.\n"
+                     "In the rare case of a Run.js crash, runjswatch restarts Run.js which then restarts your process. Not pretty, but atleast nobody had to wake you up for it."
+                     "The simple process guards the complex process.\n\n"
                      "Usage: `runjswatch` node_bin run.js `monitor` args...\n");
     return 1;
   }
@@ -224,7 +229,7 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      /* Patch argv[3], replacing "monitor" by "restart" */
+      /* Patch argv[3], replacing "monitor" by "reload:<errmsg>" to tell the monitor what happened to it */
 #define COMMAND "reload:"
       char arg_buf[ERR_SIZE + sizeof COMMAND] = COMMAND;
       argv[3] = arg_buf;
