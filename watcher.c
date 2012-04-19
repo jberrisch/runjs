@@ -31,9 +31,11 @@
 static int num_log_fds = 0;
 static int log_fds[MAX_LOG_FDS];
 
+/* The PIDs of monitor and child processes are written to these FDs. */
+int mon_pid_fd = -1, child_pid_fd = -1;
+
 static int err_pipe_fds[2] = { -1, -1 };
 static int alive_fd = -1;
-
 
 /* Until the root process exits, errors are also sent to err_fd. */
 static int err_fd = STDERR_FILENO;
@@ -66,17 +68,20 @@ static int set_cloexec(int fd) {
 
 
 /* Writes a number of characters to all the log FDs and the err_fd. */
-static void logwrite(const char* message, int count) {
-  int i;
+static int logwrite(const char* message, int count) {
+  int rv = 0, i;
   for (i = 0; i < num_log_fds; i++) {
-    write(log_fds[i], message, count);
+    if (write(log_fds[i], message, count) < 0)
+      rv = -1;
   }
+  return rv;
 }
 
 
-static void errwrite(const char* message, int count) {
+static int errwrite(const char* message, int count) {
   if (err_fd >= 0)
-    write(err_fd, message, count);
+    return write(err_fd, message, count);
+  return 0;
 }
 
 
@@ -90,28 +95,32 @@ static void errwrite(const char* message, int count) {
     va_end(argp);                                       \
                                                         \
     if (count <= 0)                                     \
-      return;
+      return -1;
 
 
 /* Like fprintf, but writes to all the log FDs. */
-static void logprintf(char* format, ...) {
+static int logprintf(char* format, ...) {
   SPRINTF_TO_BUF
-  logwrite(buf, count);
+  return logwrite(buf, count);
 }
 
 
 /* Like fprintf, but writes to all the log FDs. */
-static void errprintf(char* format, ...) {
+static int errprintf(char* format, ...) {
   SPRINTF_TO_BUF
-  logwrite(buf, count);
-  errwrite(buf, count);
+  int rv = 0;
+  if (logwrite(buf, count) < 0)
+    rv = -1;
+  if (errwrite(buf, count) < 0)
+    rv = -1;
+  return rv;
 }
 
 
 /* Like fprintf, but takes a file descriptor instead of a FILE struct. */
-static void fdprintf(int fd, char* format, ...) {
+static int fdprintf(int fd, char* format, ...) {
   SPRINTF_TO_BUF
-  write(fd, buf, count);
+  return write(fd, buf, count);
 }
 
 
@@ -124,13 +133,44 @@ static void fatal_error(char* syscall) {
 }
 
 
+static int write_pid_file(int fd, int pid) {
+  char buf[33];
+  int rv = 0;
+  int count;
+
+  count = snprintf(buf, sizeof buf, "%d", pid);
+  if (count < 0)
+    return -1;
+  if (lseek(fd, 0, SEEK_SET) < 0)
+    rv = -1;
+  if (ftruncate(fd, 0) < 0)
+    rv = -1;
+  if (write(fd, buf, count) < 0)
+    rv = -1;
+
+  return rv;
+}
+
+
 static void invalid_args() {
   fdprintf(err_fd,
+           "\n"
            "Usage: watcher [options] [--] command\n"
+           "\n"
            "Options:\n"
-           "  -f <file>           Log diagnostic output to the specified file.\n"
-           "  -u <host>:<port>    Send diagnostic output to an UDP port.\n"
-           "  --no-setsid         Do not make the monitor process session leader.\n"
+           "\n"
+           "  -f <file>             Log diagnostic output to the specified file.\n"
+           "                        It is possible to specify -f multiple times.\n"
+           "\n"
+           "  -u [<host>:]<port>    Send diagnostic output to an UDP endpoint.\n"
+           "                        If <host> is not specified, the loopback address will be used.\n"
+           "                        It is possible to specify -u multiple times.\n"
+           "\n"
+           "  -cp <file>            Write the child pid to the specified file.\n"
+           "\n"
+           "  -mp <file>            Write the monitor pid to the specified file.\n"
+           "\n"
+           "  --no-setsid           Do not make the monitor process session leader.\n"
            "\n");
   exit(1);
 }
@@ -187,10 +227,16 @@ static int run_monitor() {
   old_err_fd = err_fd;
   err_fd = err_pipe_fds[1];
 
- /* Close the root process end of the err pipe, and the original err_fd. */
- if (close(err_pipe_fds[0]) < 0)
+  /* Write the pid file for the monitor process. */
+  if (mon_pid_fd >= 0 && write_pid_file(mon_pid_fd, getpid()) < 0)
+    fatal_error("write_pid_file");
+
+  /* Close the root process end of the err pipe, and the original err_fd. */
+  if (close(err_pipe_fds[0]) < 0)
     fatal_error("close");
   if (close(old_err_fd) < 0)
+    fatal_error("close");
+  if (mon_pid_fd >= 0 && close(mon_pid_fd) < 0)
     fatal_error("close");
 
   /* Make the monitor daemon session group leader. This can fail only if */
@@ -222,6 +268,12 @@ static int run_monitor() {
   }
 
   time_t last_start_time = time(NULL);
+
+  logprintf("Forked the child process. (PID: %d)\n", child_pid);
+  if (child_pid_fd >= 0 && write_pid_file(child_pid_fd, child_pid) < 0) {
+    kill(child_pid, SIGKILL);
+    fatal_error("write_pid_file");
+  }
 
   /* Close the err fd. If execvp() also succeeds the child process will close */
   /* it's handle because of CLOEXEC. In that case the pipe is broken and the */
@@ -336,6 +388,10 @@ static int run_monitor() {
     }
 
     last_start_time = time(NULL);
+
+    logprintf("Forked the child process. (PID: %d)\n", child_pid);
+    if (child_pid_fd >= 0)
+      write_pid_file(child_pid_fd, child_pid);
   }
 }
 
@@ -431,6 +487,30 @@ int main(int argc, char* const argv[]) {
 
         log_fds[num_log_fds++] = fd;
 
+      } else if (strcmp(arg, "-mp") == 0) {
+        /* Write monitor pid to file <file> */
+        if (++i >= argc)
+          invalid_args();
+        if (mon_pid_fd != -1)
+          invalid_args();
+
+        if ((mon_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+          fatal_error("open");
+        if (set_cloexec(mon_pid_fd))
+          fatal_error("set_cloexec");
+
+      } else if (strcmp(arg, "-cp") == 0) {
+        /* Write child PIDs to file <file> */
+        if (++i >= argc)
+          invalid_args();
+        if (child_pid_fd != -1)
+          invalid_args();
+
+        if ((child_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+          fatal_error("open");
+        if (set_cloexec(child_pid_fd))
+          fatal_error("set_cloexec");
+
       } else if (strcmp(arg, "--no-setsid") == 0) {
         /* Disable setsid */
         no_setsid = 1;
@@ -516,6 +596,8 @@ int main(int argc, char* const argv[]) {
     return run_monitor();
   }
 
+  logprintf("Forked the monitor process. (PID: %d)\n", monitor_pid);
+
   /* Root process. */
   int r, had_error;
   char buf[512];
@@ -554,6 +636,6 @@ int main(int argc, char* const argv[]) {
 
   /* If we get here, the monitor daemon was started succesfully and it */
   /* successfully exec'ed once. */
-  errprintf("The monitor was started, and `%s` was successfully started.\n", command[0]);
+  errprintf("The monitor was started (PID: %d), and `%s` was successfully started once.\n", monitor_pid, command[0]);
   return 0;
 }
