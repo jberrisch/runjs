@@ -175,5 +175,22 @@ probes.define("run.js", 0, function(callback) {
     });
 });
 
+probes.define("vmstat", 0, function(callback) {
+    if(process.platform === 'sunos')
+        getOutput("vmstat", [], function(err, stdout) {
+            if(err) return callback(err);
+            var lines = stdout.split('\n'),
+                head = lines[1].split(/\s+/);
+            var obj = {};
+            var item = lines[2].split(/\s+/);
+            for (var col = 0; col < head.length - 1; col++)
+                if(head[col])
+                    obj[head[col]] = parseInt(item[col], 10);
+            callback(null, obj);
+        });
+    else
+        callback(null, "no-data");
+});
+
 probes.intervalProber(process.argv[2] || "unix", 30000, true);
 runjs.reflector();
