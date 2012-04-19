@@ -921,14 +921,13 @@ if (module.parent) // are we being used as a module?
     return;
     
 // ------------------------------------------------------------------------------------------
-// exception handler to print exception in log
+// exception handler to print exception in log. runjswatch will restart us
 // ------------------------------------------------------------------------------------------
 
 var uncaught_exception_store = null;
 process.on("uncaughtException", function(err) {
-    
     var s = uncaught_exception_store;
-    monlog(s?s.tag:"", "Monitor Exception "+process.pid+" "+err.message+" higher powers required\n"+err.stack);
+    monlog(s?s.tag:"", "FATAL Monitor Exception "+process.pid+" "+err.message+"\n"+err.stack);
     process.exit(-1);
 });
     
@@ -939,7 +938,7 @@ process.on("uncaughtException", function(err) {
 // check if daemonize exists, otherwise compile it
 if(!path.existsSync(runjswatch_bin)){
     out("#br Runjswatch is not available, attempting to build it....\n");
-    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v"]);
+    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v", process.platform === 'sunos'?"-lsocket":""]);
 
     function stdoutw(d){process.stdout.write(d);}
     p.stdout.on('data',stdoutw);
