@@ -192,5 +192,5 @@ probes.define("vmstat", 0, function(callback) {
         callback(null, "no-data");
 });
 
-probes.intervalProber(process.argv[2] || "unix", 30000, true);
+probes.intervalProber(process.argv[2] || "unix", 10000, true);
 runjs.reflector();
