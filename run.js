@@ -586,14 +586,14 @@ function startMonitor(tag, flags, script, args) {
                 stderr_buffer = d;
             else {
                 var now = new Date().getTime();
-                d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
+                d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*?)\]\]\]\]\]\]/g,function(m, stamp, rest){
                     var delta = now - parseFloat(stamp);
                     try {
                         var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
                         fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
                         fs.closeSync(fd);
         				if(flags['-m'] && rest) {
-    	                    var buf = new Buffer(rest);
+    	                    var buf = new Buffer("[[[[[["+rest+"]]]]]]");
     	                    udpClient.send(buf, 0, buf.length, udpPort, udpHost);
     	                }
                     } catch(e) {

@@ -1,10 +1,6 @@
 var http = require("http");
 process.stdin.resume();
 
-var re = /^\s*(\S+)\s+(.+)$/;
-
-var buffer = '';
-
 var collectedData = {};
 var dataAge = {};
 
@@ -14,18 +10,19 @@ function onReceiveProbe(system, json) {
     //console.log(system, json);
 }
 
+var buffer = '';
 process.stdin.on("data", function(data) {
     buffer += data.toString();
-    var match = buffer.match(re);
-    if(!match)
-        return;
-    try {
-        var system = match[1];
-        var json = JSON.parse(match[2]);
-        buffer = '';
-        onReceiveProbe(system, json);
-    } catch(e) {
-    }
+    
+    buffer = buffer.replace(/\[\[\[\[\[\[\s*(\S+)\s+(.+?)\]\]\]\]\]\]/g, function(m, system, jsonS) {
+        try {
+            var json = JSON.parse(jsonS);
+            onReceiveProbe(system, json);
+        } catch(e) {
+            console.log("Wrong packet:", e, e.message, buffer);
+        }
+        return "";
+    });
 });
 
 function htmlify(s) {
@@ -74,17 +71,14 @@ http.createServer(function(req, res) {
     if(req.url === "/json") {
         res.writeHead(200, {'Content-Type': 'text/plain'});
         res.end(JSON.stringify(aggregateData, null, 2));
-        console.log("-------------------");
         return;
     }
     
     res.writeHead(200, {'Content-Type': 'text/html'});
     res.write("<html><head><title>C9 monitor</title></head><body>");
-    console.log(aggregateData);
     var keys = Object.keys(aggregateData).sort();
     keys.forEach(function(key) {
         res.write("<h1>" + key + "</h1>Updated: " + ((Date.now() - dataAge[key])/1000) + "s ago<br/>");
-        console.log("Data", key, aggregateData[key]);
         res.write(probeJsonToHtml(aggregateData[key]));
     });
     res.end("</body></html>");
