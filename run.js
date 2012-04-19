@@ -22,8 +22,6 @@ var probe_start     = 500;
 var launch_timeout  = 60000;
 var command_poll    = 500;
 
-var monitorHost = "localhost";
-
 var appname = "#m runjs# ";
 
 function getTagPaths(tag) {
@@ -77,7 +75,7 @@ function monlog(tag, msg) {
     var msg =  "[" + tag + " "+process.pid+" " + (new Date).toString() + "] " + msg + "\n";
     fs.writeSync(fd, msg);
     fs.closeSync(fd);
-    //process.stdout.write(msg);
+    process.stdout.write(msg);
 }
 
 function shortDateTime(d) {
@@ -569,35 +567,46 @@ function startMonitor(tag, flags, script, args) {
             },  flags['-lt'] ? parseInt(flags['-lt'], 10)*1000 : launch_timeout);
         }
     }
+
+    if(flags['-m']) {
+        var udpClient = dgram.createSocket("udp4");
+        var parts = flags['-m'].split(':');
+        var udpHost = parts[0];
+        var udpPort = parseInt(parts[1], 10);
+    };
     
+    var stderr_buffer = '';
     p.stderr.on('data', function(data) {
-        if(timers.kill){
+        if(timers.kill) {
             clearTimeout(timers.kill);
             timers.kill = setTimeout(killTimeout, kill_timeout);
             
-            var d = data.toString();
-            var now = new Date().getTime();
-            d = d.replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
-                var delta = now - parseFloat(stamp);
-                try {
-                    var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                    fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
-                    fs.closeSync(fd);
-    				if(monitorHost) {
-	                    var udpClient = dgram.createSocket("udp4");
-	                    var buf = new Buffer(rest);
-	                    udpClient.send(buf, 0, buf.length, 4444, monitorHost, function() {
-	                        udpClient.close();
-	                    });
-	                }
-                } catch(e) {
-                    monlog(null, "Failed to write to probe file: " + e.message);
-                }
-                return ''; 
-            });
-            outfile.write(d);
-        } else
+            var d = stderr_buffer + data.toString();
+            if(d.indexOf("[[[[[[") !== -1 && d.indexOf("]]]]]]") === -1)
+                stderr_buffer = d;
+            else {
+                var now = new Date().getTime();
+                d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*)\]\]\]\]\]\]/g,function(m, stamp, rest){
+                    var delta = now - parseFloat(stamp);
+                    try {
+                        var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
+                        fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
+                        fs.closeSync(fd);
+        				if(flags['-m'] && rest) {
+    	                    var buf = new Buffer(rest);
+    	                    udpClient.send(buf, 0, buf.length, udpPort, udpHost);
+    	                }
+                    } catch(e) {
+                        monlog(null, "Failed to write to probe file: " + e.message);
+                    }
+                    return ''; 
+                });
+                stderr_buffer = '';
+                outfile.write(d);
+            }
+        } else {
             outfile.write(data);
+        }
     });
     
     p.stdin.on('error', function() {    
@@ -980,6 +989,7 @@ function help() {
     out("       #by -c:clusternodes # how many clusternodes to start\n")
     out("       #by -w:waitfor # the process startup is verified with a waitfor string\n")
     out("       #by -p # probe the process to see if its alive using stdin/out probing\n")
+    out("       #by -m:host:port # send probing information via UDP to host:port\n")
     out("       #by -t:tag # provide process tag explicitly, normally its the filename of your .js file\n")
     out(n + " #bg stop #by tag #w stop particular process nicely\n")
     out(n + " #bg kill #by tag #w kills a particular process with kill -9\n")
@@ -1076,9 +1086,7 @@ if (args[0].match(/^monlog/i)) {
 }
 
 if (args[0].match(/^tail$/i)) {
-    return exports.tail(args[1], out, function(err) {
-        if (err) out("#br ERROR: # " + err +"\n")
-    });
+    return exports.tail(out, args[1]);
 }
 
 if (args[0].match(/^cluster$/i)) {

@@ -1,7 +1,7 @@
 var http = require("http");
 process.stdin.resume();
 
-var re = /^\s*(\w+)\s+(.+)$/;
+var re = /^\s*(\S+)\s+(.+)$/;
 
 var buffer = '';
 
@@ -11,6 +11,7 @@ var dataAge = {};
 function onReceiveProbe(system, json) {
     collectedData[system] = json;
     dataAge[system] = Date.now();
+    //console.log(system, json);
 }
 
 process.stdin.on("data", function(data) {
@@ -44,19 +45,49 @@ function probeJsonToHtml(results) {
     return html;
 }
 
+function aggregateProxies(data) {
+    var all = {};
+    if(!data["proxy/master"]) // data did not come in yet
+        return data;
+    dataAge["proxy"] = dataAge["proxy/master"];
+    var aggregateData = {
+        "Handover": data["proxy/master"]["Handover"],
+        "IDE Servers": data["proxy/master"]["IDE Servers"],
+        "Workspace count": data["proxy/master"]["Workspace count"],
+        "Requests": {err: null, r: 0},
+        "WS Requests": {err: null, r: 0},
+    };
+    for(var server in data) {
+        if(server.indexOf("proxy/") !== 0)
+            all[server] = data[server];
+        else {
+            aggregateData["Requests"].r += data[server]["Requests"].r;
+            aggregateData["WS Requests"].r += data[server]["WS Requests"].r;
+        }
+    }
+    all.proxy = aggregateData;
+    return all;
+}
+
 http.createServer(function(req, res) {
+    var aggregateData = aggregateProxies(collectedData);
     if(req.url === "/json") {
         res.writeHead(200, {'Content-Type': 'text/plain'});
-        res.end(JSON.stringify(collectedData, null, 2));
+        res.end(JSON.stringify(aggregateData, null, 2));
+        console.log("-------------------");
         return;
     }
-
+    
     res.writeHead(200, {'Content-Type': 'text/html'});
     res.write("<html><head><title>C9 monitor</title></head><body>");
-    var keys = Object.keys(collectedData).sort();
+    console.log(aggregateData);
+    var keys = Object.keys(aggregateData).sort();
     keys.forEach(function(key) {
         res.write("<h1>" + key + "</h1>Updated: " + ((Date.now() - dataAge[key])/1000) + "s ago<br/>");
-        res.write(probeJsonToHtml(collectedData[key]));
+        console.log("Data", key, aggregateData[key]);
+        res.write(probeJsonToHtml(aggregateData[key]));
     });
     res.end("</body></html>");
-}).listen(4445);
+}).listen(4445, "0.0.0.0");
+
+console.log("Listening on port 4445");

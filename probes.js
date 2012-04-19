@@ -60,8 +60,8 @@ function probeMulti(names, timeout, callback) {
 exports.reflector = function(name){
     process.stdin.on('data', function(data) {
         probeAll(1000, function(err, result) {
-            data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]\n/g, function(m,a,b){
-                return '[[[[[[' + a + ' ' + name + ' ' + JSON.stringify(result) + ']]]]]]\n';
+            data = data.toString().replace(/\[\[\[\[\[\[(\d+)(.*)\]\]\]\]\]\]/g, function(m,a,b){
+                return '[[[[[[' + a + ' ' + name + ' ' + JSON.stringify(result) + ']]]]]]';
             });
             process.stderr.write(data);
         });
@@ -72,7 +72,7 @@ exports.reflector = function(name){
 exports.intervalProber = function(name, interval, now){
     function iter() {
         probeAll(interval * 0.8, function(err, result) {
-            process.stderr.write('[[[[[[-1 ' + name + ' ' + JSON.stringify(result) + ']]]]]]\n');
+            process.stderr.write('[[[[[[-1 ' + name + ' ' + JSON.stringify(result) + ']]]]]]');
         });
     }
     setInterval(iter, interval);
