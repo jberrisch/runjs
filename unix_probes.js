@@ -159,5 +159,19 @@ probes.define("df", 0, function(callback) {
     });
 });
 
+probes.define("run.js", 0, function(callback) {
+    runjs.list(false, function(err, processes) {
+        processes.forEach(function(process) {
+            delete process.tp;
+            delete process.out;
+            process.status = process.ps ? "OK" : "FAIL";
+            process.monStatus = process.monps ? "OK" : "FAIL";
+            delete process.monps;
+            delete process.ps.COMMAND;
+        });
+        callback(null, processes);
+    });
+});
+
 probes.intervalProber(process.argv[2] || "unix", 30000, true);
 runjs.reflector();

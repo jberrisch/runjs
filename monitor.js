@@ -34,7 +34,7 @@ function probeJsonToHtml(results) {
     var probes = Object.keys(results).sort();
     probes.forEach(function(probeName) {
         var result = results[probeName];
-        html += '<tr><td width="200">' + probeName + '</td><td width="*" style="background-color: '+ (result.err ? "#EA5454" : "#55C149") + '"><code>';
+        html += '<tr><td width="200" valign="top">' + probeName + '</td><td width="*" style="background-color: '+ (result.err ? "#EA5454" : "#55C149") + '"><code>';
         html += htmlify(result.err || JSON.stringify(result.r, null, 2));
         html += '</code></td></tr>';
     });
