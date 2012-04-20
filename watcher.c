@@ -466,6 +466,8 @@ int main(int argc, char* const argv[]) {
         int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (fd < 0)
           fatal_error("socket");
+        if (set_cloexec(fd))
+          fatal_error("set_cloexec");
 
         if (connect(fd, addr->ai_addr, addr->ai_addrlen) < 0)
           fatal_error("connect");
