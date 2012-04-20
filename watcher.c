@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 
 /* Kill the process when it doesn't output anything on its stdout for more */
 /* than N seconds. */
