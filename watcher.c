@@ -555,7 +555,7 @@ int main(int argc, char* const argv[]) {
   /* Create a socket pair that will be supplied to the child process. The */
   /* child process is supposed to write something to its stderr at least once */
   /* every second, or it will be killed and restarted. */
-  if (socketpair(AF_LOCAL, SOCK_STREAM, 0, temp_fds) < 0)
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, temp_fds) < 0)
     fatal_error("socketpair");
   if (set_cloexec(temp_fds[0]) < 0)
     fatal_error("set_cloexec");
