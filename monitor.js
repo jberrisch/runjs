@@ -10,6 +10,17 @@ function onReceiveProbe(system, json) {
     //console.log(system, json);
 }
 
+setInterval(function() {
+    var now = Date.now();
+    for(var serverName in collectedData) {
+        // Remove old data after 1min
+        if(dataAge[serverName] + 60000 <= now) {
+            delete dataAge[serverName];
+            delete collectedData[serverName];
+        }
+    }
+}, 10000);
+
 var buffer = '';
 process.stdin.on("data", function(data) {
     buffer += data.toString();
@@ -34,13 +45,16 @@ function probeJsonToHtml(results) {
     var probes = Object.keys(results).sort();
     probes.forEach(function(probeName) {
         var result = results[probeName];
-        html += '<tr><td width="200" valign="top">' + probeName + '</td><td width="*" style="background-color: '+ (result.err ? "#EA5454" : "#55C149") + '"><code>';
+        html += '<tr><td width="200">' + probeName + '</td><td width="*" style="background-color: '+ (result.err ? "#EA5454" : "#55C149") + '"><code>';
         html += htmlify(result.err || JSON.stringify(result.r, null, 2));
         html += '</code></td></tr>';
     });
     html += '</table>';
     return html;
 }
+
+var oldRequestCount = 0;
+var oldRequestTime = 0;
 
 function aggregateProxies(data) {
     var all = {};
@@ -62,6 +76,17 @@ function aggregateProxies(data) {
             aggregateData["WS Requests"].r += data[server]["WS Requests"].r;
         }
     }
+    var now = Date.now();
+    try {
+        var currAggregateRequests = aggregateData["Requests"].r;
+        aggregateData["Reqs/s"] = {err: null, r: Math.round((currAggregateRequests - oldRequestCount)/((now - oldRequestTime)/1000))};
+        //aggregateData["Reqs/s prev"] = {err: null, r: };
+        oldRequestCount = currAggregateRequests;
+        oldRequestTime = now;
+    } catch(e) {
+        aggregateData["Reqs/s"] = e.message;
+    }
+    
     all.proxy = aggregateData;
     return all;
 }
