@@ -48,7 +48,7 @@ static char* const* command = NULL;
 static int no_setsid = 0;
 
 /* This is nonzero if a SIGCHLD signal is caught. */
-static volatile unsigned int child_exited = 0;
+static volatile sig_atomic_t child_exited = 0;
 
 
 /* Sets the CLOEXEC flag on a file descriptor. Returns 0 on success, and -1 */
