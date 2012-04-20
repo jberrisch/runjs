@@ -179,6 +179,7 @@ static void invalid_args() {
 
 static void sigchld_handler(int signal) {
   child_exited = ~0;
+  (void) signal;
 }
 
 static void block_sigchld() {
