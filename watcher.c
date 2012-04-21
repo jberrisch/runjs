@@ -7,12 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <time.h>
 
 /* Kill the process when it doesn't output anything on its stdout for more */
@@ -190,11 +191,33 @@ static void block_sigchld() {
 }
 
 
-static void unblock_sigchld() {
-  sigset_t s;
-  sigemptyset(&s);
-  sigaddset(&s, SIGUSR1);
-  sigprocmask(SIG_UNBLOCK, &s, NULL);
+static ssize_t atomic_recv(int fd,
+                           void *buf,
+                           size_t size,
+                           volatile sig_atomic_t* flag) {
+  sigset_t sigmask;
+  fd_set readfds;
+  int r;
+
+  /* Unblock SIGCHLD for the duration of the pselect() syscall. */
+  sigprocmask(SIG_BLOCK, NULL, &sigmask);
+  sigdelset(&sigmask, SIGCHLD);
+  FD_ZERO(&readfds);
+  FD_SET(fd, &readfds);
+  r = pselect(fd + 1, &readfds, NULL, NULL, NULL, &sigmask);
+
+  if (r == -1) {
+    /* If the syscall got interrupted by a signal and the signal flag is set,
+     * it means we received an expected signal. Otherwise, it's an error.
+     */
+    if (errno == EINTR && flag && *flag)
+      return 0;
+    else
+      return r;
+  }
+
+  /* Safe to call now. We know there's pending data so the call won't block. */
+  return recv(fd, buf, size, 0);
 }
 
 
@@ -299,15 +322,8 @@ static int run_monitor() {
 
     need_newline = 0;
     do {
-      /* Try to read from the alive socket. It has a timeout of 1 second. */
-      /* There is a small race condition here: if the SIGCHLD signal arrives */
-      /* just between unblocking the signal and the recv() call, we will */
-      /* block for a while on the recv(). However since recv() has a timeout */
-      /* this is unlikely to cause any real problems. */
-      unblock_sigchld();
-      if (child_exited) break;
-      r = recv(alive_fd, &buf, sizeof buf, 0);
-      block_sigchld();
+      /* recv() that unblocks SIGCHLD atomically. */
+      r = atomic_recv(alive_fd, buf, sizeof buf, &child_exited);
 
       /* Output whatever data was read to the log. */
       if (r > 0) {
