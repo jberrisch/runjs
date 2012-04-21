@@ -154,7 +154,7 @@ static int write_pid_file(int fd, int pid) {
 }
 
 
-static void invalid_args() {
+static void invalid_args(void) {
   fdprintf(err_fd,
            "\n"
            "Usage: watcher [options] [--] command\n"
@@ -183,7 +183,7 @@ static void sigchld_handler(int signal) {
   (void) signal;
 }
 
-static void block_sigchld() {
+static void block_sigchld(void) {
   sigset_t s;
   sigemptyset(&s);
   sigaddset(&s, SIGUSR1);
@@ -240,7 +240,7 @@ static int run_child(int is_first_attempt) {
 }
 
 
-static int run_monitor() {
+static int run_monitor(void) {
   pid_t child_pid;
   struct sigaction chld_action;
   int old_err_fd;
