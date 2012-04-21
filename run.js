@@ -16,12 +16,13 @@ var runjswatch_c   = runjswatch_bin + ".c";
 var runjswatch_mode= 0550;
 var cc_bin         = "gcc"
 
-var kill_timeout    = 10000;
-var probe_timeout   = 500;
-var probe_start     = 500;
-var launch_timeout  = 60000;
-var command_poll    = 500;
-
+var kill_timeout    = 10 * 1000;
+var probe_timeout   = 0.5 * 1000;
+var probe_start     = 0.5 * 1000;
+var launch_timeout  = 60 * 1000;
+var command_poll    = 0.5 * 1000;
+var switch_delay    = 30 * 1000;
+var switch_kill     = 45 * 60 * 1000;
 var appname = "#m runjs# ";
 
 function getTagPaths(tag) {
@@ -217,6 +218,7 @@ function tagInfo(tag, cb){
     try {
         item.pid = fs.readFileSync(tp.pid).toString();
         item.monpid = fs.readFileSync(tp.monpid).toString();
+		item.command = fs.readFileSync(tp.command).toString();
         item.restarts = fs.readFileSync(tp.restarts).toString();
     }
     catch (e) { }
@@ -339,7 +341,9 @@ function formatTaglist(out, tags){
             if (t2 > 2) { // t2 is the diff between now and the last pid update. if > 2 secs, the monitor stopped doing that
                 t = t2;
                 pre = '#br ';
-                post = p.monps ? ' Monitor not updating pid file # ' : ' Monitor down # ';
+                post = p.monps ? (
+						(p.command=='switch'?' Switching':' Monitor not updating pid file # '))
+						: ' Monitor down # ';
             }
             var s = t % 60,
                 m = (t - s) % (60 * 60),
@@ -347,6 +351,9 @@ function formatTaglist(out, tags){
                 d = (t - s - m - h);
             return pre + (d ? (d / (60 * 60 * 24)) + 'd' : '') + (h ? (h / (60 * 60)) + 'h' : '') + (m ? (m / 60) + 'm' : '') + ('00' + s).slice(-2) + "s" + post;
         },
+		'Cmd':function(p){
+			return p.command;
+		},
         "out": function(p) {
 
             if(!p.out)
@@ -486,7 +493,11 @@ function startMonitor(tag, flags, script, args) {
                     setTimeout(function() {
                         monlog(tag, "Switch sending SIGHUP");
                         stopProcess('SIGHUP', false);
-                    }, 30 * 1000);
+                    }, switch_delay);
+					setTimeout(function(){
+						monlog(tag, "Somehow the process is still here, KILLING");
+						stopProcess('SIGKILL', false);
+					}, switch_kill);
                 });
 
         }
@@ -589,9 +600,11 @@ function startMonitor(tag, flags, script, args) {
                 d = d.replace(/\[\[\[\[\[\[(\-?\d+)(.*?)\]\]\]\]\]\]/g,function(m, stamp, rest){
                     var delta = now - parseFloat(stamp);
                     try {
-                        var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
-                        fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
-                        fs.closeSync(fd);
+						if(rest || delta > 4){
+                        	var fd = fs.openSync(tp.probe, 'a+', tp.file_mode);
+                        	fs.writeSync(fd, shortDateTime(new Date()) + " - " + delta+" "+rest+"\n");
+                        	fs.closeSync(fd);
+						}	
         				if(flags['-m'] && rest) {
     	                    var buf = new Buffer("[[[[[["+rest+"]]]]]]");
     	                    udpClient.send(buf, 0, buf.length, udpPort, udpHost);
