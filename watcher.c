@@ -298,13 +298,10 @@ static int run_monitor(void) {
     fatal_error("write_pid_file");
   }
 
-  /* Close the err fd. If execvp() also succeeds the child process will close */
-  /* it's handle because of CLOEXEC. In that case the pipe is broken and the */
-  /* root process will know that execvp() worked. */
-  do {
-    r = close(err_fd);
-  } while (r < 0 && errno == EINTR);
-  if (r < 0) {
+  r = close(err_fd);
+
+  /* Ignore EINTR. close() is interruptible but a retry will fail with EBADF. */
+  if (r == -1 && errno != EINTR) {
     kill(child_pid, SIGKILL);
     fatal_error("close");
   }
