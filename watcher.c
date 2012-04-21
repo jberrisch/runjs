@@ -274,9 +274,7 @@ static int run_monitor(void) {
   chld_action.sa_handler = sigchld_handler;
   sigemptyset (&chld_action.sa_mask);
   chld_action.sa_flags = SA_NOCLDSTOP;
-  if (sigaction(SIGCHLD, &chld_action, NULL) < 0) {
-    fatal_error("sigaction");
-  }
+  sigaction(SIGCHLD, &chld_action, NULL);
 
   /* Block sigchld, or it could interrupt syscalls. It will be unblocked */
   /* just before recv() is called. */
