@@ -448,7 +448,7 @@ int main(int argc, char* const argv[]) {
         struct addrinfo* addr;
         struct addrinfo hints;
 
-        memset((void*) &hints, 0, sizeof hints);
+        memset(&hints, 0, sizeof hints);
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
         hints.ai_protocol = IPPROTO_UDP;
