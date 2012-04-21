@@ -311,7 +311,6 @@ static int run_monitor(void) {
   for (;;) {
     char buf[512];
     int r, status, did_kill, need_newline;
-    time_t now;
 
     logprintf("Start reading output from `%s`.\n", command[0]);
 
@@ -369,20 +368,13 @@ static int run_monitor(void) {
     }
 
     /* If the previous child process exited too quickly, wait. */
-    now = time(NULL);
-    if (now == -1 || last_start_time == -1) {
-      /* If either of the time() calls failed, sleep unconditionally */
-      logprintf("time() failed. Waiting %d seconds before attempting respawn.\n", RESPAWN_MIN_INTERVAL);
-      sleep(RESPAWN_MIN_INTERVAL);
+    time_t delta = time(NULL) - last_start_time;
+    if (delta >= 0 && delta < RESPAWN_MIN_INTERVAL) {
+      int respawn_after = RESPAWN_MIN_INTERVAL - delta;
+      logprintf("`%s` exited too quickly. Waiting %d seconds before attempting respawn.\n", command[0], respawn_after);
+      sleep(RESPAWN_MIN_INTERVAL - delta);
     } else {
-      time_t delta = now - last_start_time;
-      if (delta >= 0 && delta < RESPAWN_MIN_INTERVAL) {
-        int respawn_after = RESPAWN_MIN_INTERVAL - delta;
-        logprintf("`%s` exited too quickly. Waiting %d seconds before attempting respawn.\n", command[0], respawn_after);
-        sleep(RESPAWN_MIN_INTERVAL - delta);
-      } else {
-        logprintf("`%s` exited after %u seconds.\n", command[0], (unsigned int) delta);
-      }
+      logprintf("`%s` exited after %u seconds.\n", command[0], (unsigned int) delta);
     }
 
     /* Restart the child process. */
