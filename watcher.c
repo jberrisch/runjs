@@ -500,7 +500,7 @@ int main(int argc, char* const argv[]) {
         if (num_log_fds >= MAX_LOG_FDS)
           invalid_args();
 
-        if ((fd = open(argv[i], O_CREAT | O_APPEND | O_WRONLY, 0550)) < 0)
+        if ((fd = open(argv[i], O_CREAT | O_APPEND | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(fd))
           fatal_error("set_cloexec");
@@ -514,7 +514,7 @@ int main(int argc, char* const argv[]) {
         if (mon_pid_fd != -1)
           invalid_args();
 
-        if ((mon_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+        if ((mon_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(mon_pid_fd))
           fatal_error("set_cloexec");
@@ -526,7 +526,7 @@ int main(int argc, char* const argv[]) {
         if (child_pid_fd != -1)
           invalid_args();
 
-        if ((child_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+        if ((child_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(child_pid_fd))
           fatal_error("set_cloexec");
