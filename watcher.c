@@ -431,20 +431,16 @@ int main(int argc, char* const argv[]) {
 
         /* Break up the next argument into a host and a port. They should */
         /* be separated by a colon. */
-        char* address = strdup(argv[i]);
+        char *address = strdup(argv[i]);
+        char *colon = strchr(address, ':');
         const char *host = NULL, *port = NULL;
-        int j, len = strlen(address);
-        for (j = 0; j < len; j++) {
-          if (address[j] == ':') {
-            address[j] = '\0';
-            host = address;
-            port = &address[j + 1];
-            break;
-          }
-        }
 
-        /* If no colon was specified, assume only a port was given. */
-        if (host == NULL) {
+        if (colon) {
+          *colon = '\0';
+          host = address;
+          port = colon + 1;
+        } else {
+          /* If no colon was specified, assume only a port was given. */
           host = "127.0.0.1";
           port = address;
         }
