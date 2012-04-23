@@ -7,12 +7,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <time.h>
 
 /* Kill the process when it doesn't output anything on its stdout for more */
 /* than N seconds. */
@@ -47,7 +49,7 @@ static char* const* command = NULL;
 static int no_setsid = 0;
 
 /* This is nonzero if a SIGCHLD signal is caught. */
-static volatile unsigned int child_exited = 0;
+static volatile sig_atomic_t child_exited = 0;
 
 
 /* Sets the CLOEXEC flag on a file descriptor. Returns 0 on success, and -1 */
@@ -152,7 +154,7 @@ static int write_pid_file(int fd, int pid) {
 }
 
 
-static void invalid_args() {
+static void invalid_args(void) {
   fdprintf(err_fd,
            "\n"
            "Usage: watcher [options] [--] command\n"
@@ -178,9 +180,10 @@ static void invalid_args() {
 
 static void sigchld_handler(int signal) {
   child_exited = ~0;
+  (void) signal;
 }
 
-static void block_sigchld() {
+static void block_sigchld(void) {
   sigset_t s;
   sigemptyset(&s);
   sigaddset(&s, SIGUSR1);
@@ -188,11 +191,33 @@ static void block_sigchld() {
 }
 
 
-static void unblock_sigchld() {
-  sigset_t s;
-  sigemptyset(&s);
-  sigaddset(&s, SIGUSR1);
-  sigprocmask(SIG_UNBLOCK, &s, NULL);
+static ssize_t atomic_recv(int fd,
+                           void *buf,
+                           size_t size,
+                           volatile sig_atomic_t* flag) {
+  sigset_t sigmask;
+  fd_set readfds;
+  int r;
+
+  /* Unblock SIGCHLD for the duration of the pselect() syscall. */
+  sigprocmask(SIG_BLOCK, NULL, &sigmask);
+  sigdelset(&sigmask, SIGCHLD);
+  FD_ZERO(&readfds);
+  FD_SET(fd, &readfds);
+  r = pselect(fd + 1, &readfds, NULL, NULL, NULL, &sigmask);
+
+  if (r == -1) {
+    /* If the syscall got interrupted by a signal and the signal flag is set,
+     * it means we received an expected signal. Otherwise, it's an error.
+     */
+    if (errno == EINTR && flag && *flag)
+      return 0;
+    else
+      return r;
+  }
+
+  /* Safe to call now. We know there's pending data so the call won't block. */
+  return recv(fd, buf, size, 0);
 }
 
 
@@ -215,7 +240,7 @@ static int run_child(int is_first_attempt) {
 }
 
 
-static int run_monitor() {
+static int run_monitor(void) {
   pid_t child_pid;
   struct sigaction chld_action;
   int old_err_fd;
@@ -249,9 +274,7 @@ static int run_monitor() {
   chld_action.sa_handler = sigchld_handler;
   sigemptyset (&chld_action.sa_mask);
   chld_action.sa_flags = SA_NOCLDSTOP;
-  if (sigaction(SIGCHLD, &chld_action, NULL) < 0) {
-    fatal_error("sigaction");
-  }
+  sigaction(SIGCHLD, &chld_action, NULL);
 
   /* Block sigchld, or it could interrupt syscalls. It will be unblocked */
   /* just before recv() is called. */
@@ -275,13 +298,10 @@ static int run_monitor() {
     fatal_error("write_pid_file");
   }
 
-  /* Close the err fd. If execvp() also succeeds the child process will close */
-  /* it's handle because of CLOEXEC. In that case the pipe is broken and the */
-  /* root process will know that execvp() worked. */
-  do {
-    r = close(err_fd);
-  } while (r < 0 && errno == EINTR);
-  if (r < 0) {
+  r = close(err_fd);
+
+  /* Ignore EINTR. close() is interruptible but a retry will fail with EBADF. */
+  if (r == -1 && errno != EINTR) {
     kill(child_pid, SIGKILL);
     fatal_error("close");
   }
@@ -291,21 +311,13 @@ static int run_monitor() {
   for (;;) {
     char buf[512];
     int r, status, did_kill, need_newline;
-    time_t now;
 
     logprintf("Start reading output from `%s`.\n", command[0]);
 
     need_newline = 0;
     do {
-      /* Try to read from the alive socket. It has a timeout of 1 second. */
-      /* There is a small race condition here: if the SIGCHLD signal arrives */
-      /* just between unblocking the signal and the recv() call, we will */
-      /* block for a while on the recv(). However since recv() has a timeout */
-      /* this is unlikely to cause any real problems. */
-      unblock_sigchld();
-      if (child_exited) break;
-      r = recv(alive_fd, &buf, sizeof buf, 0);
-      block_sigchld();
+      /* recv() that unblocks SIGCHLD atomically. */
+      r = atomic_recv(alive_fd, buf, sizeof buf, &child_exited);
 
       /* Output whatever data was read to the log. */
       if (r > 0) {
@@ -356,20 +368,13 @@ static int run_monitor() {
     }
 
     /* If the previous child process exited too quickly, wait. */
-    now = time(NULL);
-    if (now == -1 || last_start_time == -1) {
-      /* If either of the time() calls failed, sleep unconditionally */
-      logprintf("time() failed. Waiting %d seconds before attempting respawn.\n", RESPAWN_MIN_INTERVAL);
-      sleep(RESPAWN_MIN_INTERVAL);
+    time_t delta = time(NULL) - last_start_time;
+    if (delta >= 0 && delta < RESPAWN_MIN_INTERVAL) {
+      int respawn_after = RESPAWN_MIN_INTERVAL - delta;
+      logprintf("`%s` exited too quickly. Waiting %d seconds before attempting respawn.\n", command[0], respawn_after);
+      sleep(RESPAWN_MIN_INTERVAL - delta);
     } else {
-      time_t delta = now - last_start_time;
-      if (delta >= 0 && delta < RESPAWN_MIN_INTERVAL) {
-        int respawn_after = RESPAWN_MIN_INTERVAL - delta;
-        logprintf("`%s` exited too quickly. Waiting %d seconds before attempting respawn.\n", command[0], respawn_after);
-        sleep(RESPAWN_MIN_INTERVAL - delta);
-      } else {
-        logprintf("`%s` exited after %u seconds.\n", command[0], (unsigned int) delta);
-      }
+      logprintf("`%s` exited after %u seconds.\n", command[0], (unsigned int) delta);
     }
 
     /* Restart the child process. */
@@ -426,20 +431,16 @@ int main(int argc, char* const argv[]) {
 
         /* Break up the next argument into a host and a port. They should */
         /* be separated by a colon. */
-        char* address = strdup(argv[i]);
+        char *address = strdup(argv[i]);
+        char *colon = strchr(address, ':');
         const char *host = NULL, *port = NULL;
-        int j, len = strlen(address);
-        for (j = 0; j < len; j++) {
-          if (address[j] == ':') {
-            address[j] = '\0';
-            host = address;
-            port = &address[j + 1];
-            break;
-          }
-        }
 
-        /* If no colon was specified, assume only a port was given. */
-        if (host == NULL) {
+        if (colon) {
+          *colon = '\0';
+          host = address;
+          port = colon + 1;
+        } else {
+          /* If no colon was specified, assume only a port was given. */
           host = "127.0.0.1";
           port = address;
         }
@@ -447,7 +448,7 @@ int main(int argc, char* const argv[]) {
         struct addrinfo* addr;
         struct addrinfo hints;
 
-        memset((void*) &hints, 0, sizeof hints);
+        memset(&hints, 0, sizeof hints);
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
         hints.ai_protocol = IPPROTO_UDP;
@@ -464,6 +465,8 @@ int main(int argc, char* const argv[]) {
         int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (fd < 0)
           fatal_error("socket");
+        if (set_cloexec(fd))
+          fatal_error("set_cloexec");
 
         if (connect(fd, addr->ai_addr, addr->ai_addrlen) < 0)
           fatal_error("connect");
@@ -480,7 +483,7 @@ int main(int argc, char* const argv[]) {
         if (num_log_fds >= MAX_LOG_FDS)
           invalid_args();
 
-        if ((fd = open(argv[i], O_CREAT | O_APPEND | O_WRONLY, 0550)) < 0)
+        if ((fd = open(argv[i], O_CREAT | O_APPEND | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(fd))
           fatal_error("set_cloexec");
@@ -494,7 +497,7 @@ int main(int argc, char* const argv[]) {
         if (mon_pid_fd != -1)
           invalid_args();
 
-        if ((mon_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+        if ((mon_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(mon_pid_fd))
           fatal_error("set_cloexec");
@@ -506,7 +509,7 @@ int main(int argc, char* const argv[]) {
         if (child_pid_fd != -1)
           invalid_args();
 
-        if ((child_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0550)) < 0)
+        if ((child_pid_fd = open(argv[i], O_CREAT | O_TRUNC | O_WRONLY, 0660)) < 0)
           fatal_error("open");
         if (set_cloexec(child_pid_fd))
           fatal_error("set_cloexec");
@@ -553,7 +556,7 @@ int main(int argc, char* const argv[]) {
   /* Create a socket pair that will be supplied to the child process. The */
   /* child process is supposed to write something to its stderr at least once */
   /* every second, or it will be killed and restarted. */
-  if (socketpair(AF_LOCAL, SOCK_STREAM, 0, temp_fds) < 0)
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, temp_fds) < 0)
     fatal_error("socketpair");
   if (set_cloexec(temp_fds[0]) < 0)
     fatal_error("set_cloexec");
