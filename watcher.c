@@ -197,6 +197,7 @@ static ssize_t atomic_recv(int fd,
                            volatile sig_atomic_t* flag) {
   sigset_t sigmask;
   fd_set readfds;
+  struct timespec timeout;
   int r;
 
   /* Unblock SIGCHLD for the duration of the pselect() syscall. */
@@ -204,7 +205,11 @@ static ssize_t atomic_recv(int fd,
   sigdelset(&sigmask, SIGCHLD);
   FD_ZERO(&readfds);
   FD_SET(fd, &readfds);
-  r = pselect(fd + 1, &readfds, NULL, NULL, NULL, &sigmask);
+
+  memset(&timeout, 0, sizeof timeout);
+  timeout.tv_sec = READ_TIMEOUT;
+
+  r = pselect(fd + 1, &readfds, NULL, NULL, &timeout, &sigmask);
 
   if (r == -1) {
     /* If the syscall got interrupted by a signal and the signal flag is set,
@@ -214,6 +219,11 @@ static ssize_t atomic_recv(int fd,
       return 0;
     else
       return r;
+  }
+
+  if (r == 0) {
+    /* Timeout. */
+    return 0;
   }
 
   /* Safe to call now. We know there's pending data so the call won't block. */
@@ -406,7 +416,6 @@ int main(int argc, char* const argv[]) {
   pid_t monitor_pid;
   int temp_fds[2];
   int i;
-  const struct timeval read_timeout = { tv_sec: READ_TIMEOUT, tv_usec: 0 };
 
   /* Parse arguments. */
   for (i = 1; i < argc; i++) {
@@ -567,14 +576,6 @@ int main(int argc, char* const argv[]) {
   if (close(temp_fds[1]) < 0)
     fatal_error("close");
   alive_fd = temp_fds[0];
-
-  /* Set the receive timeout for the alive fd to 1 second. */
-  if (setsockopt(alive_fd,
-                 SOL_SOCKET,
-                 SO_RCVTIMEO,
-                 (const void*) &read_timeout,
-                 sizeof read_timeout) < 0)
-    fatal_error("setsockopt");
 
   /* Create a pipe that the forks will use to write errors to. The root */
   /* process will wait until the pipe breaks. If no output appears on the */
