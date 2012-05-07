@@ -8,7 +8,7 @@ var dgram = require("dgram");
 //    configuration
 // ------------------------------------------------------------------------------------------
 
-var node_bin_self = process.platform === "sunos" ? "/shared/software/node6" : "node";
+var node_bin_self = "node";
 var node_bin_other = "node";
 
 var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"runjswatch";
