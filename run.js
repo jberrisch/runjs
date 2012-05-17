@@ -148,7 +148,10 @@ function childrenOfPid(pid, callback) {
 };
 
 function psaux(pid, cb) {
-    cp.exec('ps aux' + (pid ? ' ' + pid : ''), function(error, stdout, stderr) {
+    var cmd = (process.platform === "linux" && pid)
+        ? ('ps -o user,pid,%cpu,%mem,vsize,rss,tt,stat,time,command -p ' + pid)
+        : ('ps aux' + (pid ? ' ' + pid : ''));
+    cp.exec(cmd, function(error, stdout, stderr) {
         var lines = stdout.split('\n');
         if (error || (pid && lines.length != 3)) return cb(error);
         // parse output of ps aux into an object or array of objects with column name as key
