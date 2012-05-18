@@ -150,7 +150,7 @@ function childrenOfPid(pid, callback) {
 
 function psaux(pid, cb) {
     var cmd = (process.platform === "linux" && pid)
-        ? ('ps -o user,pid,%cpu,%mem,vsize,rss,tt,stat,time,command -p ' + pid)
+        ? ('ps u ' + pid)
         : ('ps aux' + (pid ? ' ' + pid : ''));
     cp.exec(cmd, function(error, stdout, stderr) {
         var lines = stdout.split('\n');
