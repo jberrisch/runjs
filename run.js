@@ -699,7 +699,10 @@ exports.start = function(tag, flags, script, args, cb) {
 
         var a = [node_bin_self, module.filename, "monitor", tag, JSON.stringify(flags), script];
         a = a.concat(args);
-        var p = cp.spawn(runjswatch_bin, a), d = "";
+        var p = cp.spawn(runjswatch_bin, a, {
+            env : process.env
+        });
+        var d = "";
     
         p.stdout.on('data', function(data) {
             d += data;

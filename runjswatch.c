@@ -28,6 +28,8 @@
 /* stderr to monitor error passthrough */
 #define ERR_SIZE 1024
 
+extern char **environ;
+
 static int err_fd = -1;
 static volatile unsigned int child_exited = 0;
 
