@@ -966,7 +966,7 @@ process.on("uncaughtException", function(err) {
 // check if daemonize exists, otherwise compile it
 if(!path.existsSync(runjswatch_bin)){
     out("#br Runjswatch is not available, attempting to build it....\n");
-    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin,"-v", process.platform === 'sunos'?"-lsocket":""]);
+    var p = cp.spawn(cc_bin, [runjswatch_c,"-o",runjswatch_bin]);
 
     function stdoutw(d){process.stdout.write(d);}
     p.stdout.on('data',stdoutw);
