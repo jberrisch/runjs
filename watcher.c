@@ -108,7 +108,7 @@ static int logprintf(char* format, ...) {
 
 
 /* Like fprintf, but writes to all the log FDs. */
-static int errprintf(char* format, ...) {
+static int errprintf(const char* format, ...) {
   SPRINTF_TO_BUF
   int rv = 0;
   if (logwrite(buf, count) < 0)
@@ -120,7 +120,7 @@ static int errprintf(char* format, ...) {
 
 
 /* Like fprintf, but takes a file descriptor instead of a FILE struct. */
-static int fdprintf(int fd, char* format, ...) {
+static int fdprintf(int fd, const char* format, ...) {
   SPRINTF_TO_BUF
   return write(fd, buf, count);
 }
@@ -128,7 +128,7 @@ static int fdprintf(int fd, char* format, ...) {
 
 /* Exits the process due to a fatal error. Prints a custom message and an */
 /* error message describing the current value of `errno`. */
-static void fatal_error(char* syscall) {
+static void fatal_error(const char* syscall) {
   char* errmsg = strerror(errno);
   errprintf("Error: (%s) %s\n", syscall, errmsg);
   exit(1);
