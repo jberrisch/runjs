@@ -52,6 +52,45 @@ static int no_setsid = 0;
 static volatile sig_atomic_t child_exited = 0;
 
 
+/* Signal-safe version of usleep(). */
+static void safe_usleep(unsigned long us) {
+  struct timeval timeout;
+  struct timeval before;
+  struct timeval after;
+  unsigned long elapsed;
+  int r;
+
+  for (;;) {
+    if (gettimeofday(&before, NULL))
+      abort();
+
+    timeout.tv_sec = us / 1000000;
+    timeout.tv_usec = us % 1000000;
+    r = select(0, NULL, NULL, NULL, &timeout);
+
+    if (r == 0)
+      return;
+
+    if (r != -1)
+      abort();
+
+    if (errno != EINTR)
+      abort();
+
+    if (gettimeofday(&after, NULL))
+      abort();
+
+    elapsed  = (after.tv_sec - before.tv_sec) * 1000000;
+    elapsed += (1000000 - before.tv_usec + after.tv_usec) % 1000000;
+
+    if (elapsed >= us)
+      return;
+
+    us -= elapsed;
+  }
+}
+
+
 /* Sets the CLOEXEC flag on a file descriptor. Returns 0 on success, and -1 */
 /* on failure. */
 static int set_cloexec(int fd) {
@@ -236,6 +275,9 @@ static int run_child(int is_first_attempt) {
   signal(SIGCHLD, SIG_DFL);
 
   logprintf("Starting `%s` (first time: %s)\n", command[0], is_first_attempt ? "yes" : "no");
+
+  if (!is_first_attempt)
+    safe_usleep(1000000);
 
   execvp(command[0], command);
 
