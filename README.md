@@ -24,6 +24,9 @@ $ ./runjs
 Runjs works with tag names, that you refer to in your commands.
 
 ```sh
+# list all managed processes (+ state)
+runjs
+
 # start a node script
 runjs start -t:TAGNAME /path/to/nodejs/file.js -other -command -line -options
 
