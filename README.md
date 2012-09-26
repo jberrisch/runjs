@@ -17,6 +17,7 @@ $ git checkout stable
 $ ./runjs
 
 # link the runjs folder in your PATH or symlink in your own project folder
+# $ ln -s $PWD/runjs /usr/local/bin/runjs
 ```
 
 ## Control your application
