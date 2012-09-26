@@ -10,7 +10,7 @@ When using run.js, please use the [stable](https://github.com/c9/runjs/tree/stab
 
 ```sh
 # clone the repo
-$ git clone git@github.com:c9/runjs.git
+$ git clone git://github.com/c9/runjs.git
 # checkout stable branch
 $ git checkout stable
 # compile the binary on your platform
