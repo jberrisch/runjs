@@ -11,7 +11,7 @@ var dgram = require("dgram");
 var node_bin_self = process.platform === "sunos" ? "/shared/software/node6" : "node";
 var node_bin_other = "node";
 
-var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"runjswatch";
+var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"watcher";
 var runjswatch_c   = runjswatch_bin + ".c";
 var runjswatch_mode= 0550;
 var cc_bin         = "gcc"
