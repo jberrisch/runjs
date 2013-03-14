@@ -13,7 +13,7 @@ var node_bin_other = "node";
 
 var runjswatch_bin = module.filename.replace(/run\.js$/,"")+"watcher";
 var runjswatch_c   = runjswatch_bin + ".c";
-var runjswatch_mode= 0550;
+var runjswatch_mode= 0555;
 var cc_bin         = "gcc"
 
 var kill_timeout    = 10000;
